@@ -56,6 +56,9 @@ public:
     Q_INVOKABLE void clearMessages();
     Q_INVOKABLE void renameSession(const QString &name);
 
+    // 导出当前对话为 Markdown
+    Q_INVOKABLE bool exportCurrentChat(const QString &filePath);
+
 signals:
     void currentSessionChanged();
     void sessionNameChanged();

@@ -2,6 +2,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Dialogs
 
 ApplicationWindow {
     id: appWindow
@@ -191,6 +192,57 @@ ApplicationWindow {
             renameField.text = mainView.sessionName
             renameField.forceActiveFocus()
             renameField.selectAll()
+        }
+    }
+
+    // ── 导出文件选择对话框 ────────────────────────────────────────────────────
+    FileDialog {
+        id: exportFileDialog
+        title: "导出对话"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Markdown (*.md)"]
+        defaultSuffix: "md"
+        acceptLabel: "保存"
+        onAccepted: {
+            var path = selectedFile.toString()
+            var ok = mainView.exportCurrentChat(path)
+            exportResultDialog.isSuccess = ok
+            exportResultDialog.open()
+        }
+    }
+
+    // ── 导出结果提示对话框 ────────────────────────────────────────────────────
+    Dialog {
+        id: exportResultDialog
+        title: exportResultDialog.isSuccess ? "保存成功" : "保存失败"
+        modal: true
+        anchors.centerIn: parent
+        width: 300
+
+        property bool isSuccess: true
+
+        background: Rectangle { color: "#1E1F22"; radius: 8; border.color: cBorder }
+
+        contentItem: Column {
+            spacing: 12; padding: 16
+            Text {
+                text: exportResultDialog.isSuccess
+                      ? "对话已导出为 Markdown 文件。"
+                      : "无法写入文件，请检查路径或权限。"
+                color: cText; font.pixelSize: 14; lineHeight: 1.5; wrapMode: Text.Wrap
+                width: 260
+            }
+        }
+
+        footer: Row {
+            spacing: 8; padding: 12; layoutDirection: Qt.RightToLeft
+            Button {
+                text: "确定"; width: 80; height: 32
+                contentItem: Text { text: parent.text; color: "white"; font.pixelSize: 13;
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: 5; color: cAccent }
+                onClicked: exportResultDialog.close()
+            }
         }
     }
 
@@ -468,7 +520,7 @@ ApplicationWindow {
                                             depth: nodeDepth, expanded: nodeExpanded,
                                             parentId: model.nodeParentId || ""
                                         }
-                                        var target = appWindow.overlay || appWindow.contentItem || appWindow
+                                        var target = Overlay.overlay || appWindow.contentItem
                                         var pos = mainMouseArea.mapToItem(target, mouse.x, mouse.y)
                                         historyContextMenu.openAt(pos.x, pos.y)
                                     }
@@ -757,7 +809,7 @@ ApplicationWindow {
                         }
                     }
 
-                    // 显示/隐藏思考过程（右上角）
+                    // 显示/隐藏思考过程
                     Rectangle {
                         width: 110; height: 30; radius: 5
                         color: thinkToggleHover.hovered
@@ -780,6 +832,25 @@ ApplicationWindow {
                         MouseArea {
                             anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                             onClicked: settings.showThinking = !settings.showThinking
+                        }
+                    }
+
+                    // 导出对话（右上角）
+                    Rectangle {
+                        width: 70; height: 30; radius: 5
+                        color: exportHover.hovered ? Qt.lighter(cHighlight, 1.12) : cHighlight
+                        Row {
+                            anchors.centerIn: parent; spacing: 5
+                            Text { text: "📤"; font.pixelSize: 12 }
+                            Text { text: "导出"; color: cText; font.pixelSize: 12 }
+                        }
+                        ToolTip.text: "导出当前对话为 Markdown"
+                        ToolTip.visible: exportHover.hovered
+                        ToolTip.delay: 600
+                        HoverHandler { id: exportHover }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: exportFileDialog.open()
                         }
                     }
                 }
@@ -911,6 +982,62 @@ ApplicationWindow {
                                     : ""
                                 color: cMuted; font.pixelSize: 11
                                 Layout.fillWidth: true
+                            }
+
+                            // 常用模型选择器（ICON+文字，与对话/智能体/规划风格一致）
+                            Rectangle {
+                                id: modelSelectorBtn
+                                width: 100
+                                height: 32
+                                radius: 8
+                                property bool hovered: modelBtnHover.hovered
+                                color: hovered ? cHighlight : cInput
+                                border.color: hovered ? cBorder : "transparent"
+                                border.width: 1
+
+                                Row {
+                                    anchors.centerIn: parent
+                                    spacing: 6
+
+                                    Image {
+                                        width: 16
+                                        height: 16
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        source: "qrc:/src/qml/icon_model.svg"
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                        mipmap: true
+                                    }
+                                    Text {
+                                        text: (typeof settings !== "undefined" && settings.modelName)
+                                            ? settings.modelName : "模型"
+                                        color: cText
+                                        font.pixelSize: 12
+                                        font.weight: Font.Normal
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        elide: Text.ElideRight
+                                        maximumLineCount: 1
+                                        width: 62
+                                    }
+                                }
+
+                                HoverHandler { id: modelBtnHover }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        var overlay = Overlay.overlay
+                                        if (!overlay) return
+                                        var pos = modelSelectorBtn.mapToItem(overlay, 0, 0)
+                                        // 在按钮上方打开，避免被输入区遮挡
+                                        modelSelectPopup.x = Math.min(pos.x, overlay.width - modelSelectPopup.width - 6)
+                                        modelSelectPopup.y = Math.max(6, pos.y - modelSelectPopup.height - 4)
+                                        modelSelectPopup.open()
+                                    }
+                                }
+                                ToolTip.text: "点击切换模型"
+                                ToolTip.visible: modelBtnHover.hovered
+                                ToolTip.delay: 600
                             }
 
                             // 发送按钮
@@ -1098,6 +1225,7 @@ ApplicationWindow {
     // ── 历史项右键菜单（自定义漂亮样式，跟随鼠标）────────────────────────────────
     Popup {
         id: historyContextMenu
+        parent: Overlay.overlay
         property var targetNode: null
         property var folderOptions: []
         // 过滤后的“添加到”选项：已在根目录时隐藏“(空)”
@@ -1274,6 +1402,70 @@ ApplicationWindow {
             onClicked: function(mouse) {
                 if (mouse.button === Qt.LeftButton)
                     ctxItem.triggered()
+            }
+        }
+    }
+
+    // ── 常用模型选择弹窗 ───────────────────────────────────────────────────────
+    Popup {
+        id: modelSelectPopup
+        parent: Overlay.overlay
+        width: 180
+        padding: 6
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        background: Rectangle {
+            color: "#25272B"
+            radius: 8
+            border.width: 1
+            border.color: cBorder
+        }
+
+        contentItem: ListView {
+            clip: true
+            model: typeof settings !== "undefined" ? settings.modelList : []
+            spacing: 2
+            implicitHeight: Math.min(contentHeight, 240)
+
+            delegate: Rectangle {
+                width: ListView.view.width - 12
+                height: 34
+                radius: 6
+                color: modelItemHover.hovered ? cHighlight : "transparent"
+
+                Row {
+                    anchors { fill: parent; leftMargin: 10 }
+                    spacing: 8
+                    Text {
+                        text: "✓"
+                        color: (typeof settings !== "undefined" && settings.modelName === modelData)
+                            ? cAccent : "transparent"
+                        font.pixelSize: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 14
+                    }
+                    Text {
+                        text: modelData
+                        color: cText
+                        font.pixelSize: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        elide: Text.ElideRight
+                        width: 130
+                    }
+                }
+
+                HoverHandler { id: modelItemHover }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (typeof settings !== "undefined")
+                            settings.modelName = modelData
+                        modelSelectPopup.close()
+                    }
+                }
             }
         }
     }

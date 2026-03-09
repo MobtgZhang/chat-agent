@@ -18,7 +18,7 @@ public:
     explicit About(QObject *parent = nullptr);
 
     QString appName()     const { return QStringLiteral("ChatAgent"); }
-    QString version()     const { return QStringLiteral("1.0.0"); }
+    QString version()     const { return QStringLiteral("1.2.0"); }
     QString buildDate()   const { return QStringLiteral(__DATE__ " " __TIME__); }
     QString description() const { return QStringLiteral("支持 OpenAI 兼容接口的本地 AI 聊天客户端，\n支持流式输出、Markdown 渲染与数学公式显示。"); }
     QString qtVersion()   const { return QStringLiteral(QT_VERSION_STR); }

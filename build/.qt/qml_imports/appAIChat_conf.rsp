@@ -1,0 +1,11 @@
+-rootPath
+/home/mobtgzhang/AgentClaw/AgentClawApp6
+-cmake-output
+-output-file
+/home/mobtgzhang/AgentClaw/AgentClawApp6/build/.qt/qml_imports/appAIChat_conf.cmake
+-importPath
+/home/mobtgzhang/AgentClaw/AgentClawApp6/build
+-importPath
+/home/mobtgzhang/Qt/6.10.2/gcc_64/qml
+-qrcFiles
+/home/mobtgzhang/AgentClaw/AgentClawApp6/build/.qt/rcc/qml_res.qrc

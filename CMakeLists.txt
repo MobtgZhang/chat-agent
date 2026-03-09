@@ -51,12 +51,14 @@ qt_add_resources(appAIChat "qml_res"
         src/qml/md_render.html
         src/qml/copy.svg
         src/qml/pencil.svg
+        src/qml/regenerate.svg
         src/qml/icon_chat.svg
         src/qml/icon_agent.svg
         src/qml/icon_planning.svg
         src/qml/icon_chat_active.svg
         src/qml/icon_agent_active.svg
         src/qml/icon_planning_active.svg
+        src/qml/icon_model.svg
         src/qml/Settings.qml
         src/qml/About.qml
 )

@@ -1,0 +1,2 @@
+set(__QT_DEPLOY_TARGET_appAIChat_FILE /home/mobtgzhang/AgentClaw/AgentClawApp6/build/appAIChat)
+set(__QT_DEPLOY_TARGET_appAIChat_TYPE EXECUTABLE)

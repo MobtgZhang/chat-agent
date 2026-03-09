@@ -134,6 +134,7 @@ Window {
 
                         ComboBox {
                             Layout.fillWidth: true
+                            Layout.preferredHeight: 36
                             model: settings.modelList
                             currentIndex: {
                                 var idx = settings.modelList.indexOf(settings.modelName)

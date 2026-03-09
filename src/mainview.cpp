@@ -18,6 +18,8 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QFile>
+#include <QTextStream>
+#include <QUrl>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -149,6 +151,40 @@ void MainView::renameSession(const QString &name) {
     m_sessionName = name.trimmed();
     m_history->renameNode(m_currentSession, m_sessionName);
     emit sessionNameChanged();
+}
+
+bool MainView::exportCurrentChat(const QString &filePath) {
+    if (filePath.isEmpty()) return false;
+    QString path = filePath;
+    if (path.startsWith(QLatin1String("file:")))
+        path = QUrl(path).toLocalFile();
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+
+    QTextStream out(&f);
+
+    out << "# " << m_sessionName << "\n\n";
+
+    const QVariantList list = m_messagesModel.toVariantList();
+    for (const QVariant &v : list) {
+        QVariantMap m = v.toMap();
+        QString role = m["role"].toString();
+        QString content = m["content"].toString().trimmed();
+        QString thinking = m["thinking"].toString().trimmed();
+
+        if (role == "user") {
+            out << "## 用户\n\n" << content << "\n\n";
+        } else if (role == "ai") {
+            out << "## 助手\n\n";
+            if (!thinking.isEmpty())
+                out << "### 思考过程\n\n" << thinking << "\n\n";
+            out << content << "\n\n";
+        }
+    }
+
+    out.flush();
+    f.close();
+    return f.error() == QFile::NoError;
 }
 
 // ── 消息编辑 ──────────────────────────────────────────────────────────────────

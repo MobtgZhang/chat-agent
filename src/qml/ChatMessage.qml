@@ -360,6 +360,30 @@ Item {
                     }
                 }
 
+                // 重新生成（仅用户消息：截断后续并重新请求）
+                Rectangle {
+                    width: 24
+                    height: 24
+                    radius: 4
+                    color: regenHover.hovered ? "#5C5F66" : "transparent"
+                    visible: !root.editing && !root.isAI
+                    Image {
+                        anchors.centerIn: parent
+                        source: "qrc:/src/qml/regenerate.svg"
+                        sourceSize: Qt.size(14, 14)
+                        opacity: 0.85
+                    }
+                    HoverHandler { id: regenHover }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (typeof mainView !== "undefined")
+                                mainView.resendFrom(root.messageIndex + 1)
+                        }
+                    }
+                }
+
                 // 复制（与代码块复制按钮一致）
                 Rectangle {
                     width: 24
