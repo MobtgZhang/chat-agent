@@ -34,7 +34,8 @@ void Settings::setTopP(double v)                { if (m_topP        != v) { m_to
 void Settings::setTopK(int v)                   { if (m_topK        != v) { m_topK        = v; emit topKChanged(); } }
 void Settings::setMaxTokens(int v)              { if (m_maxTokens   != v) { m_maxTokens   = v; emit maxTokensChanged(); } }
 void Settings::setSystemPrompt(const QString &v){ if (m_systemPrompt!= v) { m_systemPrompt= v; emit systemPromptChanged(); } }
-void Settings::setShowThinking(bool v)          { if (m_showThinking!= v) { m_showThinking= v; emit showThinkingChanged(); } }
+void Settings::setMaxToolRounds(int v)           { int clamped = qBound(5, v, 40); if (m_maxToolRounds != clamped) { m_maxToolRounds = clamped; emit maxToolRoundsChanged(); } }
+void Settings::setShowThinking(bool v)            { if (m_showThinking!= v) { m_showThinking= v; emit showThinkingChanged(); } }
 
 // ── 模型列表管理 ──────────────────────────────────────────────────────────────
 void Settings::addModel(const QString &model) {
@@ -174,8 +175,9 @@ void Settings::save() {
     root["topP"]         = m_topP;
     root["topK"]         = m_topK;
     root["maxTokens"]    = m_maxTokens;
-    root["systemPrompt"] = m_systemPrompt;
-    root["showThinking"] = m_showThinking;
+    root["systemPrompt"]  = m_systemPrompt;
+    root["maxToolRounds"] = m_maxToolRounds;
+    root["showThinking"]  = m_showThinking;
 
     QJsonArray models;
     for (const QString &m : m_modelList) models.append(m);
@@ -201,8 +203,9 @@ void Settings::load() {
     if (root.contains("topP"))         m_topP         = root["topP"].toDouble(0.9);
     if (root.contains("topK"))         m_topK         = root["topK"].toInt(50);
     if (root.contains("maxTokens"))    m_maxTokens    = root["maxTokens"].toInt(4096);
-    if (root.contains("systemPrompt")) m_systemPrompt = root["systemPrompt"].toString();
-    if (root.contains("showThinking")) m_showThinking = root["showThinking"].toBool(false);
+    if (root.contains("systemPrompt"))  m_systemPrompt  = root["systemPrompt"].toString();
+    if (root.contains("maxToolRounds")) m_maxToolRounds = qBound(5, root["maxToolRounds"].toInt(40), 40);
+    if (root.contains("showThinking"))  m_showThinking  = root["showThinking"].toBool(false);
 
     if (root.contains("modelList")) {
         m_modelList.clear();

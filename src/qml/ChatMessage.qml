@@ -1,4 +1,4 @@
-// qml/ChatMessage.qml
+// qml/ChatMessage.qml — ChatGPT 风格
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
@@ -6,24 +6,48 @@ import QtQuick.Layouts 1.15
 Item {
     id: root
     width: ListView.view ? ListView.view.width : 700
-    height: innerCol.implicitHeight + 28
+    // 高度根据内容列自适应，保证 Markdown / 数学公式完全显示
+    height: bubbleColumn.implicitHeight + 28
     property string role:           "user"
-    property string msgContent:     ""
+    property string msgContent:      ""
     property string thinkingContent:""
     property bool   isThinking:     false
     property int    messageIndex:   -1
 
-    // 兼容：历史数据/接口可能用 assistant 表示 AI
+    // 版本导航（预留扩展：当前为 1/1，后续可接入多版本）
+    property int    currentVersion: 1
+    property int    totalVersions:  1
+
     property bool isAI: role === "ai" || role === "assistant"
 
-    // ── 内部状态 ─────────────────────────────────────────────────────────────
+    function hasMath(s) {
+        if (!s || typeof s !== "string") return false
+        return /\$\$|\$[^\s$]|\\[\[\()\]]/.test(s)
+    }
+
+    Component {
+        id: mdRenderComp
+        MarkdownRender { }
+    }
+    Component {
+        id: mathRenderComp
+        MarkdownMathRender { }
+    }
+
     property bool editing:        false
     property bool thinkExpanded:  false
 
-    // 当进入思考阶段时自动展开思考内容
     onIsThinkingChanged: {
         if (isThinking && settings.showThinking && isAI) {
             thinkExpanded = true
+        }
+    }
+    // 用户从关→开切换思考按钮时，若有已记录的思考内容则自动展开显示
+    Connections {
+        target: settings
+        function onShowThinkingChanged() {
+            if (settings.showThinking && isAI && thinkingContent !== "")
+                thinkExpanded = true
         }
     }
 
@@ -34,216 +58,377 @@ Item {
         onTriggered: root.thinkTime += 0.1
     }
 
-    // ── 外层行 ───────────────────────────────────────────────────────────────
+    // ChatGPT 风格：用户右对齐，AI 左对齐
     Row {
         id: outerRow
-        //anchors {
-        //    left: parent.left; right: parent.right; top: parent.top
-        //    leftMargin: 20; rightMargin: 20; topMargin: 14
-        //}
-        anchors {
-            top: parent.top
-            topMargin: 14
-            horizontalCenter: parent.horizontalCenter
-        }
+        anchors.top: parent.top
+        anchors.topMargin: 12
         width: parent.width - 40
         spacing: 12
+        layoutDirection: isAI ? Qt.LeftToRight : Qt.RightToLeft
 
         // 头像
         Rectangle {
-            width: 34; height: 34; radius: 7
+            width: 28; height: 28; radius: 6
             color: isAI ? "#F9A825" : "#5865F2"
             Text {
                 anchors.centerIn: parent
                 text: isAI ? "🤖" : "Me"
-                color: "white"; font.bold: true; font.pixelSize: 13
+                color: "white"
+                font.bold: true
+                font.pixelSize: 11
             }
         }
 
-        // 消息主体
+        // 气泡 + 内容
         Column {
-            id: innerCol
-            width: outerRow.width - 34 - outerRow.spacing
-            spacing: 6
+            id: bubbleColumn
+            width: Math.min(outerRow.width - 28 - 12, 640)
+            spacing: 0
 
-            // 发送者 + 操作按钮行
+            // 思考秒数（仅 AI，无论思考按钮开/关都显示）
             Item {
                 width: parent.width
-                height: 22
-
-                Text {
-                    text: isAI ? "ChatAgent AI" : "You"
-                    color: "#949BA4"; font.pixelSize: 12; font.bold: true
-                    //anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                // 操作按钮（始终显示：更直观，也避免 hover 在部分平台不触发）
+                height: 20
+                visible: isAI && (isThinking || thinkTime > 0)
                 Row {
-                    spacing: 4
-                    //anchors.verticalCenter: parent.verticalCenter
-                    visible: true
-                    anchors.right: parent.right
+                    spacing: 6
                     anchors.verticalCenter: parent.verticalCenter
-
-                    // 编辑按钮
-                    ToolButton {
-                        width: 48; height: 22
-                        text: "编辑"
+                    Text { text: "🧠"; font.pixelSize: 12 }
+                    Text {
+                        text: isThinking
+                            ? "思考中... " + thinkTime.toFixed(1) + "s"
+                            : "思考完成 (" + thinkTime.toFixed(1) + "s)" +
+                            (settings.showThinking && thinkingContent !== "" ? (thinkExpanded ? "  ▲" : "  ▼") : "")
+                        color: "#949BA4"
                         font.pixelSize: 11
-                        onClicked: {
-                            root.editing = !root.editing
-                            if (root.editing) editArea.text = root.msgContent
-                        }
+                        font.italic: true
                     }
-                    // 删除按钮
-                    ToolButton {
-                        width: 48; height: 22
-                        text: "删除"
-                        font.pixelSize: 11
-                        visible: !isAI    // 只允许删除用户消息
-                        onClicked: mainView.deleteMessage(root.messageIndex)
-                    }
-                    // 重新生成（仅 AI 消息）
-                    ToolButton {
-                        width: 68; height: 22
-                        text: "重新生成"
-                        font.pixelSize: 11
-                        visible: isAI
-                        onClicked: mainView.resendFrom(root.messageIndex)
-                    }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: if (settings.showThinking && thinkingContent !== "") root.thinkExpanded = !root.thinkExpanded
                 }
             }
 
-            // ── 思考过程 ──────────────────────────────────────────────────────
+            // 思考过程展开内容（仅当思考按钮打开时显示）
             Column {
                 width: parent.width
                 spacing: 4
-                // 开启「显示思考」并且为 AI 消息时，总是显示思考状态行
                 visible: settings.showThinking && isAI
 
-                // 标题行（可点击折叠）
-                Item {
-                    width: parent.width
-                    Row {
-                        id: thinkHeaderRow
-                        spacing: 6
-                        anchors.verticalCenter: parent.verticalCenter
-                        Text { text: "🧠"; font.pixelSize: 13 }
-                        Text {
-                            text: isThinking
-                                ? "思考中... " + thinkTime.toFixed(1) + "s"
-                                : "思考完成 (" + thinkTime.toFixed(1) + "s)" +
-                                (thinkingContent !== "" ? (thinkExpanded ? "  ▲" : "  ▼") : "")
-                            color: "#949BA4"; font.pixelSize: 12; font.italic: true
-                        }
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: if (thinkingContent !== "") root.thinkExpanded = !root.thinkExpanded
-                    }
-                }
-
-                // 思考内容（可折叠）
                 Rectangle {
+                    id: thinkBox
                     width: parent.width
                     visible: thinkExpanded && thinkingContent !== ""
-                    height: visible ? thinkMd.implicitHeight + 10 : 0
+                    height: visible && thinkLoader.item ? (thinkLoader.item.implicitHeight || thinkLoader.item.height) + 10 : 0
                     color: "#1A1B1E"
-                    radius: 5
+                    radius: 8
                     border.color: "#2E3035"
 
-                    // 使用 MarkdownRender 渲染思考过程，支持 Markdown 语法
-                    MarkdownRender {
-                        id: thinkMd
-                        anchors {
-                            left: parent.left
-                            right: parent.right
-                            top: parent.top
-                            margins: 8
+                    Loader {
+                        id: thinkLoader
+                        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
+                        sourceComponent: root.hasMath(root.thinkingContent) ? mathRenderComp : mdRenderComp
+                        onLoaded: {
+                            item.markdownText = root.thinkingContent
+                            item.textColor = "#C9CDD4"
+                            item.fontSize = 12
                         }
-                        markdownText: root.thinkingContent
-                        textColor: "#C9CDD4"
-                        fontSize: 13
                     }
                 }
             }
 
-            // ── 思考占位（纯 QML，不触发 WebView）───────────────────────────
+            // 思考占位
             Text {
                 width: parent.width
                 visible: settings.showThinking && isAI && root.msgContent === "" && root.isThinking
                 text: "▍"
-                color: "#949BA4"; font.pixelSize: 14
+                color: "#949BA4"
+                font.pixelSize: 14
             }
 
-            // ── 正文：Markdown 渲染 ───────────────────────────────────────────
-            MarkdownRender {
-                id: mdRender
+            // 气泡主体（ChatGPT 风格：AI 浅灰，用户蓝色）
+            Rectangle {
+                id: bubble
                 width: parent.width
-                visible: root.msgContent !== ""
-                markdownText: root.msgContent
-                textColor: isAI ? "#DBDEE1" : "#C9CDD4"
+                implicitHeight: contentCol.implicitHeight + 16
+                color: isAI ? "#404249" : "#5865F2"
+                radius: 12
+
+                Column {
+                    id: contentCol
+                    width: parent.width - 24
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    topPadding: 8
+                    bottomPadding: 8
+                    spacing: 8
+
+                    // 正文
+                    Loader {
+                        id: contentLoader
+                        width: contentCol.width
+                        visible: root.msgContent !== "" && !root.editing
+                        sourceComponent: root.hasMath(root.msgContent) ? mathRenderComp : mdRenderComp
+                        onLoaded: {
+                            item.markdownText = root.msgContent
+                            item.textColor = isAI ? "#DBDEE1" : "white"
+                        }
+                    }
+
+                    // 编辑模式
+                    Column {
+                        width: parent.width
+                        spacing: 8
+                        visible: root.editing
+
+                        TextArea {
+                            id: editArea
+                            width: parent.width
+                            height: Math.max(60, implicitHeight)
+                            text: root.msgContent
+                            color: "#DBDEE1"
+                            font.pixelSize: 14
+                            wrapMode: TextArea.Wrap
+                            background: Rectangle {
+                                color: "#2E3035"
+                                radius: 6
+                                border.color: "#5865F2"
+                                border.width: 1
+                            }
+                            padding: 10
+                        }
+                    }
+                }
             }
 
-            // ── 编辑模式 ──────────────────────────────────────────────────────
-            Column {
+            // 气泡外边右下角：复制、修改、修改记录
+            Row {
                 width: parent.width
-                spacing: 6
-                visible: root.editing
+                layoutDirection: Qt.RightToLeft
+                spacing: 4
+                topPadding: 4
 
-                Rectangle {
-                    width: parent.width
-                    height: editArea.implicitHeight + 16
-                    color: "#1E1F22"
-                    radius: 6
-                    border.color: "#5865F2"; border.width: 1
+                // 非编辑模式：复制、修改、修改记录
+                // 编辑模式：保存、取消
 
-                    TextArea {
-                        id: editArea
-                        anchors { fill: parent; margins: 8 }
-                        text: root.msgContent
-                        color: "#DBDEE1"; font.pixelSize: 14
-                        wrapMode: TextArea.Wrap
-                        background: null
-                        focus: root.editing
+                // 修改记录（版本导航）
+                Row {
+                    spacing: 2
+                    height: 24
+                    // 仅对用户气泡显示修改记录（AI 回复不需要）
+                    visible: !root.editing && !root.isAI
+
+                    Rectangle {
+                        width: 22
+                        height: 22
+                        radius: 4
+                        color: prevHover.hovered ? "#5C5F66" : "transparent"
+                        opacity: currentVersion > 1 ? 1 : 0.4
+                        Text {
+                            anchors.centerIn: parent
+                            text: "◀"
+                            color: "#B5BAC1"
+                            font.pixelSize: 10
+                        }
+                        HoverHandler { id: prevHover }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (currentVersion > 1)
+                                    root.currentVersion = currentVersion - 1
+                            }
+                        }
+                    }
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: currentVersion + "/" + totalVersions
+                        color: "#B5BAC1"
+                        font.pixelSize: 11
+                    }
+
+                    Rectangle {
+                        width: 22
+                        height: 22
+                        radius: 4
+                        color: nextHover.hovered ? "#5C5F66" : "transparent"
+                        opacity: currentVersion < totalVersions ? 1 : 0.4
+                        Text {
+                            anchors.centerIn: parent
+                            text: "▶"
+                            color: "#B5BAC1"
+                            font.pixelSize: 10
+                        }
+                        HoverHandler { id: nextHover }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (currentVersion < totalVersions)
+                                    root.currentVersion = currentVersion + 1
+                            }
+                        }
                     }
                 }
 
+                // 编辑模式：保存、取消
                 Row {
-                    spacing: 8
-                    Button {
-                        text: "保存"
-                        height: 28
-                        contentItem: Text {
-                            text: parent.text; color: "white"
-                            font.pixelSize: 13; horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
+                    spacing: 4
+                    height: 24
+                    visible: root.editing
+
+                    Rectangle {
+                        width: 44
+                        height: 24
+                        radius: 4
+                        color: cancelHover.hovered ? "#5C5F66" : "#3F4147"
+                        Text {
+                            anchors.centerIn: parent
+                            text: qsTr("取消")
+                            color: "#B5BAC1"
+                            font.pixelSize: 12
                         }
-                        background: Rectangle { radius: 5; color: "#5865F2" }
-                        onClicked: {
-                            mainView.editMessage(root.messageIndex, editArea.text)
-                            root.editing = false
+                        HoverHandler { id: cancelHover }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.editing = false
                         }
                     }
-                    Button {
-                        text: "取消"
-                        height: 28
-                        contentItem: Text {
-                            text: parent.text; color: "#DBDEE1"
-                            font.pixelSize: 13; horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
+
+                    Rectangle {
+                        width: 44
+                        height: 24
+                        radius: 4
+                        color: saveHover.hovered ? "#6B7AF2" : "#5865F2"
+                        Text {
+                            anchors.centerIn: parent
+                            text: qsTr("保存")
+                            color: "white"
+                            font.pixelSize: 12
                         }
-                        background: Rectangle { radius: 5; color: "#3F4147" }
-                        onClicked: root.editing = false
+                        HoverHandler { id: saveHover }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (typeof mainView !== "undefined") {
+                                    mainView.editAndRegenerate(root.messageIndex, editArea.text)
+                                    root.editing = false
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 修改
+                Rectangle {
+                    width: 36
+                    height: 24
+                    radius: 4
+                    color: editHover.hovered ? "#5C5F66" : "transparent"
+                    // 仅用户消息支持“修改”
+                    visible: !root.editing && !root.isAI
+                    Text {
+                        anchors.centerIn: parent
+                        text: qsTr("修改")
+                        color: "#B5BAC1"
+                        font.pixelSize: 11
+                    }
+                    HoverHandler { id: editHover }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            root.editing = true
+                            editArea.text = root.msgContent
+                            editArea.forceActiveFocus()
+                        }
+                    }
+                }
+
+                // 复制
+                Rectangle {
+                    width: 36
+                    height: 24
+                    radius: 4
+                    color: copyHover.hovered ? "#5C5F66" : "transparent"
+                    visible: !root.editing
+                    Text {
+                        anchors.centerIn: parent
+                        text: qsTr("复制")
+                        color: "#B5BAC1"
+                        font.pixelSize: 11
+                    }
+                    HoverHandler { id: copyHover }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (typeof mainView === "undefined")
+                                return
+
+                            // 用户消息：永远只复制正文
+                            if (!root.isAI) {
+                                if (root.msgContent)
+                                    mainView.copyToClipboard(root.msgContent)
+                                return
+                            }
+
+                            // AI 消息：
+                            // - 思考过程开：复制「思考过程 + 两个换行 + 正文」
+                            // - 思考过程关：只复制正文
+                            var text = ""
+                            if (settings.showThinking && root.thinkingContent) {
+                                text = root.thinkingContent
+                                if (root.msgContent)
+                                    text += "\n\n" + root.msgContent
+                            } else {
+                                text = root.msgContent
+                            }
+                            if (text)
+                                mainView.copyToClipboard(text)
+                        }
                     }
                 }
             }
         }
     }
 
-    // Hover 检测（用于显示操作按钮）
-    HoverHandler { id: msgHover }
+    // 更多菜单：删除（用户）、重新生成（AI）
+    Menu {
+        id: moreMenu
+        width: 140
+        background: Rectangle {
+            color: "#2B2D31"
+            border.color: "#3F4147"
+            radius: 6
+        }
+
+        MenuItem {
+            text: "删除消息"
+            visible: !root.isAI
+            onTriggered: mainView.deleteMessage(root.messageIndex)
+        }
+        MenuItem {
+            text: "重新生成"
+            visible: root.isAI
+            onTriggered: mainView.resendFrom(root.messageIndex)
+        }
+    }
+
+    onMsgContentChanged: {
+        if (contentLoader.item) {
+            contentLoader.item.markdownText = root.msgContent
+            contentLoader.item.textColor = isAI ? "#DBDEE1" : "white"
+        }
+    }
+    onThinkingContentChanged: {
+        if (thinkLoader.item)
+            thinkLoader.item.markdownText = root.thinkingContent
+    }
 }

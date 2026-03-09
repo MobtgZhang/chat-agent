@@ -24,6 +24,9 @@ class Settings : public QObject {
     // ── 系统提示词 ───────────────────────────────────────────────────────────
     Q_PROPERTY(QString systemPrompt READ systemPrompt WRITE setSystemPrompt NOTIFY systemPromptChanged)
 
+    // ── Agent 行为 ──────────────────────────────────────────────────────────────
+    Q_PROPERTY(int maxToolRounds READ maxToolRounds WRITE setMaxToolRounds NOTIFY maxToolRoundsChanged)
+
     // ── UI ──────────────────────────────────────────────────────────────────
     // 是否显示“思考过程”
     Q_PROPERTY(bool showThinking READ showThinking WRITE setShowThinking NOTIFY showThinkingChanged)
@@ -45,6 +48,7 @@ public:
     int        topK()         const { return m_topK; }
     int        maxTokens()    const { return m_maxTokens; }
     QString    systemPrompt() const { return m_systemPrompt; }
+    int        maxToolRounds() const { return m_maxToolRounds; }
     bool       showThinking() const { return m_showThinking; }
     bool       modelsRefreshing() const { return m_modelsRefreshing; }
     QString    modelsStatus() const     { return m_modelsStatus; }
@@ -58,6 +62,7 @@ public:
     void setTopK(int v);
     void setMaxTokens(int v);
     void setSystemPrompt(const QString &v);
+    void setMaxToolRounds(int v);
     void setShowThinking(bool v);
 
     // Model list management
@@ -79,6 +84,7 @@ signals:
     void topKChanged();
     void maxTokensChanged();
     void systemPromptChanged();
+    void maxToolRoundsChanged();
     void showThinkingChanged();
     void modelsRefreshingChanged();
     void modelsStatusChanged();
@@ -95,7 +101,8 @@ private:
     double      m_topP        = 0.9;
     int         m_topK        = 50;
     int         m_maxTokens   = 4096;
-    QString     m_systemPrompt = QStringLiteral("You are a helpful assistant.");
+    QString     m_systemPrompt;
+    int         m_maxToolRounds = 40;
     bool        m_showThinking = false;
 
     bool        m_modelsRefreshing = false;

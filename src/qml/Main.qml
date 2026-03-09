@@ -10,7 +10,7 @@ ApplicationWindow {
     visible: true
     title: "ChatAgent — " + mainView.sessionName
     color: "#2B2D31"
-    // ── 全局色板 ──────────────────────────────────────────────────────────────
+    // ── 全局色板（参考 chat-agent）──────────────────────────────────────────────
     readonly property color cBg:        "#2B2D31"
     readonly property color cSidebar:   "#1E1F22"
     readonly property color cInput:     "#383A40"
@@ -270,13 +270,28 @@ ApplicationWindow {
                     }
                 }
 
-                // ── 历史树列表 ────────────────────────────────────────────────
+                // ── 历史树列表（可上下滚动）────────────────────────────────────
                 ListView {
                     id: historyList
-                    Layout.fillWidth: true; Layout.fillHeight: true
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: 80
                     clip: true
                     model: history.flatNodes
                     spacing: 1
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                        contentItem: Rectangle {
+                            implicitWidth: 6
+                            radius: 3
+                            color: parent.pressed ? "#60636A" : (parent.hovered ? "#60636A" : "#484B52")
+                        }
+                        background: Rectangle {
+                            implicitWidth: 6
+                            color: "#2E3035"
+                            radius: 3
+                        }
+                    }
 
                     delegate: Item {
                         width: historyList.width
@@ -297,7 +312,6 @@ ApplicationWindow {
                                 anchors { fill: parent; leftMargin: node.depth * 14 + 8; rightMargin: 8 }
                                 spacing: 6
 
-                                // 图标
                                 Text {
                                     font.pixelSize: 13
                                     text: isFolder
@@ -305,7 +319,6 @@ ApplicationWindow {
                                         : (isCurrent ? "🗨️" : "💬")
                                 }
 
-                                // 名称
                                 Text {
                                     Layout.fillWidth: true
                                     text: node.name
@@ -314,12 +327,10 @@ ApplicationWindow {
                                     elide: Text.ElideRight
                                 }
 
-                                // 操作按钮（hover 时显示）
                                 Row {
                                     spacing: 2
                                     visible: itemHover.hovered
 
-                                    // 删除
                                     Text {
                                         text: "🗑"; font.pixelSize: 12
                                         color: delHover.hovered ? "#ED4245" : cMuted
@@ -339,11 +350,9 @@ ApplicationWindow {
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 onClicked: function(mouse) {
                                     if (mouse.button === Qt.RightButton) {
-                                        // 避免在菜单已打开时反复 popup 造成 Fusion/Menu.qml 的 polish 循环
                                         if (historyItemMenu.visible)
                                             return
                                         historyItemMenu.targetNode = node
-                                        // 使用 open() 让样式自行决定位置，减少手动定位引起的样式抖动
                                         historyItemMenu.open()
                                         return
                                     }
@@ -355,7 +364,6 @@ ApplicationWindow {
                                 }
                             }
 
-                            // 拖放支持：将会话/文件夹拖动到文件夹中
                             Drag.active: dragArea.drag.active
                             Drag.hotSpot.x: width / 2
                             Drag.hotSpot.y: height / 2
@@ -365,11 +373,9 @@ ApplicationWindow {
                                 id: dragArea
                                 anchors.fill: parent
                                 drag.target: null
-                                // 仅用于左键拖拽，避免右键重复弹出菜单造成 polish 循环日志
                                 acceptedButtons: Qt.LeftButton
                             }
 
-                            // 仅文件夹作为放置目标
                             DropArea {
                                 anchors.fill: parent
                                 enabled: isFolder
@@ -382,6 +388,151 @@ ApplicationWindow {
                                     drop.acceptProposedAction()
                                 }
                             }
+                        }
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#2E3035" }
+
+                // ── Agent Memory（自动总结的记忆，可删除）───────────────────────────
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 8
+                    spacing: 6
+
+                    Text {
+                        text: "🧠 Agent Memory（自动总结）"
+                        color: cText
+                        font.pixelSize: 13
+                        font.bold: true
+                        Layout.leftMargin: 10
+                    }
+
+                    ScrollView {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 120
+                        clip: true
+                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                        ListView {
+                            model: typeof agentMemory !== "undefined" && agentMemory ? agentMemory.longTermFacts : []
+                            spacing: 2
+                            delegate: Rectangle {
+                                width: ListView.view.width - 4
+                                height: 32
+                                radius: 4
+                                color: memHover.hovered ? cHighlight : "transparent"
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 6
+                                    spacing: 6
+                                    Text {
+                                        text: modelData.key + ":"
+                                        color: cAccent
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                        Layout.preferredWidth: 60
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        text: modelData.value
+                                        color: cText
+                                        font.pixelSize: 11
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        text: "×"
+                                        color: memDelHover.hovered ? "#ED4245" : cMuted
+                                        font.pixelSize: 12
+                                        HoverHandler { id: memDelHover }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (agentMemory)
+                                                    agentMemory.removeFact(modelData.key)
+                                            }
+                                        }
+                                    }
+                                }
+                                HoverHandler { id: memHover }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 10
+                        Layout.rightMargin: 10
+                        height: 28
+                        visible: agentMemory && agentMemory.longTermFacts.length > 0
+                        color: memClearHover.hovered ? "#5C2E2E" : "transparent"
+                        radius: 4
+                        border.color: "#ED4245"
+                        border.width: 1
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 4
+                            Text { text: "清空全部记忆"; color: "#ED4245"; font.pixelSize: 11 }
+                        }
+                        HoverHandler { id: memClearHover }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: memClearDialog.open()
+                        }
+                    }
+                }
+
+                // 清空记忆确认对话框
+                Dialog {
+                    id: memClearDialog
+                    title: "清空 Agent 记忆"
+                    modal: true
+                    anchors.centerIn: parent
+                    width: 300
+                    background: Rectangle { color: "#1E1F22"; radius: 8; border.color: cBorder }
+                    contentItem: Text {
+                        text: "确定要清空所有长期记忆吗？此操作不可撤销。"
+                        color: cText
+                        font.pixelSize: 13
+                    }
+                    footer: Row {
+                        spacing: 8
+                        layoutDirection: Qt.RightToLeft
+                        Button {
+                            text: "清空"
+                            width: 80
+                            height: 32
+                            contentItem: Text {
+                                text: parent.text
+                                color: "white"
+                                font.pixelSize: 13
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle { radius: 5; color: "#ED4245" }
+                            onClicked: {
+                                if (agentMemory)
+                                    agentMemory.clearLongTerm()
+                                memClearDialog.close()
+                            }
+                        }
+                        Button {
+                            text: "取消"
+                            width: 80
+                            height: 32
+                            contentItem: Text {
+                                text: parent.text
+                                color: cText
+                                font.pixelSize: 13
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle { radius: 5; color: cInput; border.color: cBorder }
+                            onClicked: memClearDialog.close()
                         }
                     }
                 }
@@ -423,7 +574,7 @@ ApplicationWindow {
             }
         }
 
-        // ═══════════════════════════ 右侧：聊天区 ════════════════════════════
+        // ═══════════════════════════ 中间：聊天区 ════════════════════════════
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -518,7 +669,7 @@ ApplicationWindow {
                 Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: cBorder }
             }
 
-            // ── 输入区（先定义，后面 ListView 上边界才能锚定它）─────────────
+            // ── 输入区 ────────────────────────────────────────────────────────
             Rectangle {
                 id: inputPanel
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
@@ -549,7 +700,6 @@ ApplicationWindow {
                                 Keys.onPressed: (event) => {
                                     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                                         if (event.modifiers & Qt.ShiftModifier) {
-                                            // Shift+Enter 换行
                                         } else {
                                             event.accepted = true
                                             _sendMsg()
@@ -563,7 +713,39 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             spacing: 8
 
-                            // 左侧：字数提示
+                            // 左侧：模式下拉菜单
+                            ComboBox {
+                                id: modeCombo
+                                implicitWidth: 120
+                                implicitHeight: 32
+                                model: ["对话", "智能体", "规划"]
+                                currentIndex: {
+                                    var m = mainView.chatMode
+                                    if (m === "chat") return 0
+                                    if (m === "agent") return 1
+                                    if (m === "planning") return 2
+                                    return 0
+                                }
+                                onCurrentIndexChanged: {
+                                    var modes = ["chat", "agent", "planning"]
+                                    if (mainView.chatMode !== modes[currentIndex])
+                                        mainView.chatMode = modes[currentIndex]
+                                }
+                                contentItem: Text {
+                                    leftPadding: 10
+                                    text: modeCombo.displayText
+                                    color: cText
+                                    font.pixelSize: 12
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    color: cInput
+                                    radius: 6
+                                    border.color: cBorder
+                                }
+                            }
+
+                            // 字数提示
                             Text {
                                 text: inputArea.text.length > 0
                                     ? inputArea.text.length + " 字"
@@ -593,7 +775,7 @@ ApplicationWindow {
                 }
             }
 
-            // ── 消息列表（精确锚定，不重叠）──────────────────────────────────
+            // ── 消息列表 ──────────────────────────────────────────────────────
             ListView {
                 id: chatListView
                 anchors {
@@ -605,6 +787,22 @@ ApplicationWindow {
                 clip: true
                 spacing: 8
                 topMargin: 16; bottomMargin: 8
+                cacheBuffer: 3000
+                reuseItems: true
+
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    contentItem: Rectangle {
+                        implicitWidth: 6
+                        radius: 3
+                        color: parent.pressed ? "#60636A" : (parent.hovered ? "#60636A" : "#484B52")
+                    }
+                    background: Rectangle {
+                        implicitWidth: 6
+                        color: "#2E3035"
+                        radius: 3
+                    }
+                }
 
                 model: mainView.messagesModel
 
@@ -617,12 +815,51 @@ ApplicationWindow {
                     messageIndex:     index
                 }
 
-                // 自动滚动到底部
-                onCountChanged:         Qt.callLater(positionViewAtEnd)
-                onContentHeightChanged: { if (atYEnd) Qt.callLater(positionViewAtEnd) }
+                onCountChanged: Qt.callLater(function() {
+                    if (typeof mainView !== "undefined" && (mainView.isStreaming || atYEnd))
+                        positionViewAtEnd()
+                })
+                onContentHeightChanged: Qt.callLater(function() {
+                    if (typeof mainView !== "undefined" && (mainView.isStreaming || atYEnd))
+                        positionViewAtEnd()
+                })
             }
 
-            // ── 右下角：对话进度 (当前节点/所有节点) ───────────────────────────
+            // 覆盖层：鼠标置于对话区域时，滚轮可上下滚动对话列表（acceptedButtons: NoButton 不拦截点击）
+            MouseArea {
+                anchors {
+                    top: chatHeader.bottom
+                    bottom: inputPanel.top
+                    left: parent.left
+                    right: parent.right
+                }
+                z: 10
+                acceptedButtons: Qt.NoButton
+                onWheel: function(wheel) {
+                    // 这里是调节鼠标滑动速度，现在是2倍速度
+                    var dy = wheel.angleDelta.y * 2
+                    if (chatListView.verticalOvershoot !== 0.0 ||
+                        (dy > 0 && chatListView.verticalVelocity <= 0) ||
+                        (dy < 0 && chatListView.verticalVelocity >= 0)) {
+                        chatListView.flick(0, dy - chatListView.verticalVelocity)
+                    } else {
+                        chatListView.cancelFlick()
+                    }
+                    wheel.accepted = true
+                }
+            }
+
+            Timer {
+                interval: 200
+                repeat: true
+                running: typeof mainView !== "undefined" && mainView.isStreaming
+                onTriggered: {
+                    if (mainView.isStreaming && chatListView.atYEnd)
+                        chatListView.positionViewAtEnd()
+                }
+            }
+
+            // ── 右下角：对话进度 ────────────────────────────────────────────────
             Text {
                 anchors {
                     right: parent.right

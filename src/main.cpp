@@ -1,13 +1,16 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
 #include "about.h"
 #include "settings.h"
 #include "history.h"
+#include "memory_module.h"
 #include "mainview.h"
 
 int main(int argc, char *argv[]) {
+    QtWebEngineQuick::initialize();
     QGuiApplication app(argc, argv);
     app.setOrganizationName("ChatAgent");
     app.setApplicationName("ChatAgent");
@@ -22,10 +25,11 @@ int main(int argc, char *argv[]) {
     // ── QML 引擎 ──────────────────────────────────────────────────────────────
     QQmlApplicationEngine engine;
     QQmlContext *ctx = engine.rootContext();
-    ctx->setContextProperty("about",    &about);
-    ctx->setContextProperty("settings", &settings);
-    ctx->setContextProperty("history",  &history);
-    ctx->setContextProperty("mainView", &mainView);
+    ctx->setContextProperty("about",       &about);
+    ctx->setContextProperty("settings",    &settings);
+    ctx->setContextProperty("history",     &history);
+    ctx->setContextProperty("mainView",    &mainView);
+    ctx->setContextProperty("agentMemory", static_cast<QObject*>(mainView.agentMemory()));
 
     const QUrl url(QStringLiteral("qrc:/src/qml/Main.qml"));
     QObject::connect(

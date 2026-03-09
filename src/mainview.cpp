@@ -1,7 +1,22 @@
 #include "mainview.h"
 #include "settings.h"
 #include "history.h"
+#include "agent_core.h"
+#include "llm_backend.h"
+#include "memory_module.h"
+#include "tool_registry.h"
+#include "tools/file_tool.h"
+#include "tools/shell_tool.h"
+#include "tools/websearch_tool.h"
+#include "tools/keyboard_tool.h"
+#include "tools/ocr_tool.h"
+#include "tools/window_tool.h"
+#include "tools/clipboard_tool.h"
+#include "tools/wait_tool.h"
+#include "tools/image_match_tool.h"
 
+#include <QGuiApplication>
+#include <QClipboard>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -15,6 +30,7 @@ MainView::MainView(Settings *settings, History *history, QObject *parent)
     : QObject(parent), m_settings(settings), m_history(history)
 {
     m_nam = new QNetworkAccessManager(this);
+    setupAgent();
 
     // 启动时加载或新建默认会话
     QString firstId = m_history->firstSessionId();
@@ -85,6 +101,58 @@ void MainView::clearMessages() {
     saveCurrentSession();
 }
 
+void MainView::setChatMode(const QString &mode) {
+    QString m = mode;
+    if (m != "chat" && m != "agent" && m != "planning")
+        m = "chat";
+    if (m_chatMode == m) return;
+    m_chatMode = m;
+    emit chatModeChanged();
+}
+
+void MainView::setupAgent() {
+    m_agentMemory = new MemoryModule(this);
+
+    LLMBackend *llm = new LLMBackend(this);
+    llm->setApiKey(m_settings->apiKey());
+    llm->setApiUrl(m_settings->apiUrl());
+    llm->setModel(m_settings->modelName());
+    connect(m_settings, &Settings::apiKeyChanged, this, [this, llm]() { llm->setApiKey(m_settings->apiKey()); });
+    connect(m_settings, &Settings::apiUrlChanged, this, [this, llm]() { llm->setApiUrl(m_settings->apiUrl()); });
+    connect(m_settings, &Settings::modelNameChanged, this, [this, llm]() { llm->setModel(m_settings->modelName()); });
+
+    ToolRegistry *reg = new ToolRegistry(this);
+    reg->registerTool(new FileTool(reg));
+    reg->registerTool(new ShellTool(reg));
+    reg->registerTool(new WebSearchTool(reg));
+    reg->registerTool(new KeyboardTool(reg));
+    reg->registerTool(new OcrTool(reg));
+    reg->registerTool(new WindowTool(reg));
+    reg->registerTool(new ClipboardTool(reg));
+    reg->registerTool(new WaitTool(reg));
+    reg->registerTool(new ImageMatchTool(reg));
+
+    m_agentCore = new AgentCore(this);
+    m_agentCore->setLLM(llm);
+    m_agentCore->setTools(reg);
+    m_agentCore->setMemory(m_agentMemory);
+    m_agentCore->setSystemPromptBase(m_settings->systemPrompt());
+    m_agentCore->setMaxToolRounds(m_settings->maxToolRounds());
+    connect(m_settings, &Settings::systemPromptChanged, this, [this]() { m_agentCore->setSystemPromptBase(m_settings->systemPrompt()); });
+    connect(m_settings, &Settings::maxToolRoundsChanged, this, [this]() { m_agentCore->setMaxToolRounds(m_settings->maxToolRounds()); });
+
+    connect(m_agentCore, &AgentCore::chunkReceived, this, [this](const QString &content, const QString &reasoning, bool isThinking) {
+        updateLastAiMessage(reasoning, content, isThinking);
+    });
+    connect(m_agentCore, &AgentCore::finished, this, [this]() {
+        setIsStreaming(false);
+        autoNameCurrentSession();
+        saveCurrentSession();
+        m_history->touchSession(m_currentSession);
+    });
+    connect(m_agentCore, &AgentCore::errorOccurred, this, &MainView::errorOccurred);
+}
+
 void MainView::renameSession(const QString &name) {
     if (name.trimmed().isEmpty()) return;
     m_sessionName = name.trimmed();
@@ -101,6 +169,28 @@ void MainView::editMessage(int index, const QString &content) {
     saveCurrentSession();
 }
 
+void MainView::editAndRegenerate(int index, const QString &content) {
+    if (index < 0 || index >= m_messagesModel.size() || m_isStreaming) return;
+    QVariantMap msg = m_messagesModel.at(index);
+    const QString role = msg["role"].toString();
+
+    msg["content"] = content.trimmed();
+    m_messagesModel.replaceAtRow(index, msg);
+
+    if (role == QLatin1String("user")) {
+        // 用户消息：截断该条之后，重新发起请求
+        m_messagesModel.truncateTo(index + 1);
+        if (m_chatMode == "chat") {
+            startApiCall(m_messagesModel.toVariantList());
+        } else {
+            startAgentCall(content.trimmed());
+        }
+    } else {
+        // AI 消息：仅保存修改，不重新生成
+        saveCurrentSession();
+    }
+}
+
 void MainView::deleteMessage(int index) {
     // 只允许删除用户消息；并且删除该条及其之后的所有消息
     if (index < 0 || index >= m_messagesModel.size()) return;
@@ -112,6 +202,12 @@ void MainView::deleteMessage(int index) {
     // 截断到 index（不含 index 本身），等价于删除当前及其之后的所有消息
     m_messagesModel.truncateTo(index);
     saveCurrentSession();
+}
+
+void MainView::copyToClipboard(const QString &text) {
+    if (text.isEmpty()) return;
+    QClipboard *cb = QGuiApplication::clipboard();
+    if (cb) cb->setText(text);
 }
 
 void MainView::resendFrom(int index) {
@@ -142,11 +238,38 @@ void MainView::sendMessage(const QString &text) {
     userMsg["id"]        = QString::number(QDateTime::currentMSecsSinceEpoch());
     m_messagesModel.appendOne(userMsg);
 
-    startApiCall(m_messagesModel.toVariantList());
+    if (m_chatMode == "chat") {
+        startApiCall(m_messagesModel.toVariantList());
+    } else {
+        startAgentCall(text.trimmed());
+    }
 }
 
 // ── 停止生成 ──────────────────────────────────────────────────────────────────
+void MainView::startAgentCall(const QString &userInput) {
+    QVariantMap aiMsg;
+    aiMsg["role"]      = "ai";
+    aiMsg["content"]   = "";
+    aiMsg["thinking"]  = "";
+    aiMsg["isThinking"]= true;
+    aiMsg["id"]        = QString::number(QDateTime::currentMSecsSinceEpoch());
+    m_messagesModel.appendOne(aiMsg);
+    setIsStreaming(true);
+
+    QString mode = (m_chatMode == "planning") ? "planning" : "agent";
+    m_agentCore->setMode(mode);
+
+    QVariantList msgs;
+    const QVariantList full = m_messagesModel.toVariantList();
+    for (int i = 0; i < full.size() - 1; ++i) {
+        msgs.append(full[i]);
+    }
+    m_agentCore->run(msgs, userInput);
+}
+
 void MainView::stopGeneration() {
+    if (m_agentCore && (m_chatMode != "chat"))
+        m_agentCore->stop();
     if (m_activeReply) {
         m_activeReply->abort();
         m_activeReply = nullptr;
@@ -210,6 +333,11 @@ void MainView::startApiCall(const QVariantList & /*history*/) {
     body["temperature"] = m_settings->temperature();
     body["top_p"]       = m_settings->topP();
     body["max_tokens"]  = m_settings->maxTokens();
+    // 始终请求思考过程，兼容多种 API：
+    // - DeepSeek: thinking.type = enabled
+    // - Qwen/通义: enable_thinking = true
+    body["thinking"]        = QJsonObject{{"type", "enabled"}};
+    body["enable_thinking"]  = true;
 
     // 构建 messages 数组（system + 历史）
     QJsonArray msgs;
@@ -344,7 +472,7 @@ QVariantList MainView::buildApiMessages() const {
     return m_messagesModel.toVariantList();
 }
 
-// ── 根据对话内容自动命名会话 ─────────────────────────────────────────────────────
+// ── 根据对话内容自动命名会话（调用 LLM 生成标题）───────────────────────────────────
 void MainView::autoNameCurrentSession() {
     if (m_currentSession.isEmpty())
         return;
@@ -356,26 +484,107 @@ void MainView::autoNameCurrentSession() {
         return;
     }
 
-    // 找第一条用户消息作为标题
-    QString title;
     const QVariantList list = m_messagesModel.toVariantList();
+    bool hasUser = false;
     for (const QVariant &v : list) {
-        const QVariantMap m = v.toMap();
-        if (m.value("role").toString() == QLatin1String("user")) {
-            title = m.value("content").toString().trimmed();
-            if (!title.isEmpty())
-                break;
+        if (v.toMap().value("role").toString() == QLatin1String("user")) {
+            hasUser = true;
+            break;
         }
     }
-
-    if (title.isEmpty())
+    if (!hasUser)
         return;
 
-    if (title.length() > 40)
-        title = title.left(40) + QStringLiteral("…");
+    requestSessionTitle();
+}
 
-    m_sessionName = title;
-    m_history->renameNode(m_currentSession, m_sessionName);
-    emit sessionNameChanged();
+void MainView::requestSessionTitle() {
+    if (m_titleReply || m_currentSession.isEmpty()) return;
+
+    // 构建对话摘要（最多取前 6 条消息，每条截断到 150 字）
+    QString dialog;
+    const QVariantList list = m_messagesModel.toVariantList();
+    int count = 0;
+    const int maxMsgs = 6;
+    const int maxPerMsg = 150;
+    for (const QVariant &v : list) {
+        if (count >= maxMsgs) break;
+        const QVariantMap m = v.toMap();
+        QString role = m.value("role").toString();
+        QString content = m.value("content").toString().trimmed();
+        if (content.isEmpty()) continue;
+        if (content.length() > maxPerMsg)
+            content = content.left(maxPerMsg) + QStringLiteral("…");
+        QString label = (role == QLatin1String("user")) ? QStringLiteral("用户") : QStringLiteral("助手");
+        dialog += QStringLiteral("[%1] %2\n").arg(label, content);
+        ++count;
+    }
+    if (dialog.isEmpty()) return;
+
+    QUrl apiUrl(m_settings->apiUrl());
+    QString path = apiUrl.path();
+    if (!path.contains(QStringLiteral("/v1"))) {
+        if (!path.endsWith(QLatin1Char('/'))) path.append(QLatin1Char('/'));
+        path.append(QStringLiteral("v1"));
+    }
+    if (!path.contains(QStringLiteral("/chat/completions"))) {
+        if (!path.endsWith(QLatin1Char('/'))) path.append(QLatin1Char('/'));
+        path.append(QStringLiteral("chat/completions"));
+    }
+    apiUrl.setPath(path);
+
+    QJsonArray msgs;
+    msgs.append(QJsonObject{
+        {"role", "system"},
+        {"content", "你是对话标题生成器。根据以下对话内容，生成一个简短有力的中文标题概括主题。"
+                    "要求：10-20个字，不要引号、句号，只输出标题本身。"}
+    });
+    msgs.append(QJsonObject{
+        {"role", "user"},
+        {"content", dialog}
+    });
+
+    QJsonObject body;
+    body["model"] = m_settings->modelName();
+    body["stream"] = false;
+    body["temperature"] = 0.3;
+    body["max_tokens"] = 50;
+    body["messages"] = msgs;
+
+    QNetworkRequest req(apiUrl);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    req.setRawHeader("Authorization",
+                     ("Bearer " + m_settings->apiKey()).toUtf8());
+
+    m_titleReply = m_nam->post(req, QJsonDocument(body).toJson());
+    connect(m_titleReply, &QNetworkReply::finished, this, [this]() {
+        if (!m_titleReply) return;
+        QNetworkReply *reply = m_titleReply;
+        m_titleReply = nullptr;
+
+        if (reply->error() != QNetworkReply::NoError
+            && reply->error() != QNetworkReply::OperationCanceledError) {
+            reply->deleteLater();
+            return;
+        }
+
+        QByteArray data = reply->readAll();
+        reply->deleteLater();
+
+        QJsonObject root = QJsonDocument::fromJson(data).object();
+        QJsonArray choices = root["choices"].toArray();
+        if (choices.isEmpty()) return;
+
+        QString title = choices.first().toObject()["message"].toObject()["content"].toString().trimmed();
+        title = title.remove(QStringLiteral("\"")).remove(QStringLiteral("「")).remove(QStringLiteral("」"));
+        if (title.isEmpty()) return;
+        if (title.length() > 40)
+            title = title.left(40) + QStringLiteral("…");
+
+        m_sessionName = title;
+        m_history->renameNode(m_currentSession, m_sessionName);
+        emit sessionNameChanged();
+        saveCurrentSession();
+    });
 }
 

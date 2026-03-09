@@ -13,6 +13,8 @@
 
 class Settings;
 class History;
+class AgentCore;
+class MemoryModule;
 
 class MainView : public QObject {
     Q_OBJECT
@@ -21,6 +23,7 @@ class MainView : public QObject {
     Q_PROPERTY(QString      currentSession  READ currentSession  NOTIFY currentSessionChanged)
     Q_PROPERTY(QString      sessionName     READ sessionName     NOTIFY sessionNameChanged)
     Q_PROPERTY(bool         isStreaming     READ isStreaming     NOTIFY isStreamingChanged)
+    Q_PROPERTY(QString      chatMode        READ chatMode        WRITE setChatMode NOTIFY chatModeChanged)
 
 public:
     explicit MainView(Settings *settings, History *history,
@@ -30,6 +33,11 @@ public:
     QString      currentSession() const { return m_currentSession; }
     QString      sessionName()    const { return m_sessionName; }
     bool         isStreaming()    const { return m_isStreaming; }
+    QString      chatMode()       const { return m_chatMode; }
+    void        setChatMode(const QString &mode);
+
+    // Agent 记忆模块（供 QML 右侧面板使用）
+    MemoryModule* agentMemory() const { return m_agentMemory; }
 
     // ── 发送与控制 ────────────────────────────────────────────────────────────
     Q_INVOKABLE void sendMessage(const QString &text);
@@ -37,8 +45,10 @@ public:
 
     // ── 消息编辑 ──────────────────────────────────────────────────────────────
     Q_INVOKABLE void editMessage(int index, const QString &content);
+    Q_INVOKABLE void editAndRegenerate(int index, const QString &content);  // 编辑后重新生成
     Q_INVOKABLE void deleteMessage(int index);
     Q_INVOKABLE void resendFrom(int index);          // 从某条消息重新生成
+    Q_INVOKABLE void copyToClipboard(const QString &text);
 
     // ── 会话管理 ──────────────────────────────────────────────────────────────
     Q_INVOKABLE void newSession(const QString &name = QString());
@@ -50,6 +60,7 @@ signals:
     void currentSessionChanged();
     void sessionNameChanged();
     void isStreamingChanged();
+    void chatModeChanged();
     void errorOccurred(const QString &msg);
 
 private:
@@ -59,9 +70,14 @@ private:
     MessageModel              m_messagesModel;
     QString                   m_currentSession;
     QString                   m_sessionName;
+    QString                   m_chatMode = "chat";
     bool                      m_isStreaming = false;
     QPointer<QNetworkReply>   m_activeReply;
+    QPointer<QNetworkReply>   m_titleReply;
     QNetworkAccessManager    *m_nam;
+
+    AgentCore    *m_agentCore = nullptr;
+    MemoryModule *m_agentMemory = nullptr;
 
     void   setIsStreaming(bool v);
     void   appendMessage(const QVariantMap &msg);
@@ -72,10 +88,13 @@ private:
     void   saveCurrentSession();
     void   loadSessionFile(const QString &id);
     void   startApiCall(const QVariantList &history);
+    void   startAgentCall(const QString &userInput);
 
-    void   autoNameCurrentSession();   // 根据对话内容自动为会话命名
+    void   autoNameCurrentSession();   // 对话结束后调用 LLM 生成标题
+    void   requestSessionTitle();      // 发起标题生成请求（异步）
 
     QVariantList buildApiMessages() const;
+    void   setupAgent();
 };
 
 #endif // MAINVIEW_H

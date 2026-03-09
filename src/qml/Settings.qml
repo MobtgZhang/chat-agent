@@ -16,30 +16,19 @@ Window {
     // ── 色板 ─────────────────────────────────────────────────────────────────
     readonly property color cBg:     "#2B2D31"
     readonly property color cPanel:  "#1E1F22"
-    readonly property color cInput:  "#383A40"
+    readonly property color cInput:   "#383A40"
     readonly property color cBorder: "#404249"
     readonly property color cText:   "#DBDEE1"
     readonly property color cMuted:  "#949BA4"
-    readonly property color cAccent: "#5865F2"
+    readonly property color cAccent:  "#5865F2"
 
     // ── 标签选项卡 ────────────────────────────────────────────────────────────
     property int currentTab: 0
-    readonly property var tabs: ["🔑 API 配置", "⚙️ 参数调节", "📝 系统提示词"]
+    readonly property var tabs: ["🔑 API 配置", "⚙️ 参数调节", "📝 系统提示词", "🤖 Agent 设置"]
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
-
-        // 标题栏
-        Rectangle {
-            Layout.fillWidth: true; height: 48
-            color: cPanel
-            Text {
-                anchors.centerIn: parent
-                text: "设置"; color: cText; font.pixelSize: 16; font.bold: true
-            }
-            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: cBorder }
-        }
 
         // Tab 行
         Rectangle {
@@ -91,13 +80,11 @@ Window {
                 id: paramsScrollView
                 anchors.fill: parent
                 clip: true
-                // 关键：固定内容宽度，避免水平滚动条出现及布局溢出
                 contentWidth: availableWidth
                 visible: settingsWin.currentTab === 0
                 enabled: visible
 
                 ColumnLayout {
-                    // 不使用 anchors，直接通过 width + x/y 定位
                     width: parent.width - 40
                     x: 20
                     y: 20
@@ -197,10 +184,9 @@ Window {
 
             // ── Tab 1: 参数调节 ───────────────────────────────────────────────
             ScrollView {
-            id: paramsTuningScroll
+                id: paramsTuningScroll
                 anchors.fill: parent
                 clip: true
-                // 关键：固定内容宽度，防止溢出；禁用水平滚动
                 contentWidth: availableWidth
                 visible: settingsWin.currentTab === 1
                 enabled: visible
@@ -287,6 +273,44 @@ Window {
                         }
                     }
                 }
+                Text {
+                    Layout.fillWidth: true
+                    text: "留空时使用内置默认提示词（物理级执行者、探测优先、失败升级）"
+                    color: cMuted; font.pixelSize: 11; wrapMode: Text.Wrap
+                }
+            }
+
+            // ── Tab 3: Agent 设置 ────────────────────────────────────────────────
+            ScrollView {
+                id: agentScrollView
+                anchors.fill: parent
+                clip: true
+                contentWidth: availableWidth
+                visible: settingsWin.currentTab === 3
+                enabled: visible
+
+                ColumnLayout {
+                    width: parent.width - 40
+                    x: 20
+                    y: 20
+                    spacing: 18
+
+                    SliderSection {
+                        label: "工具调用轮次上限"
+                        hint:  "单次任务内可执行的工具调用最大轮数，支持长任务链。"
+                        value: settings.maxToolRounds
+                        from: 5; to: 40; stepSize: 1
+                        scrollView: agentScrollView
+                        onMoved: function(v) { settings.maxToolRounds = Math.round(v) }
+                    }
+
+                    SectionBox {
+                        label: "行动原则"
+                        hint:  "Agent 采用探测优先、失败升级、立即执行的设计。在「系统提示词」tab 可自定义覆盖。"
+                    }
+
+                    Item { height: 20 }
+                }
             }
         }
 
@@ -313,14 +337,16 @@ Window {
                     }
                     background: Rectangle { radius: 5; color: cInput; border.color: cBorder }
                     onClicked: {
-                        // 参数默认值
                         settings.temperature = 0.7
                         settings.topP        = 0.9
                         settings.topK        = 50
                         settings.maxTokens   = 4096
-                        // API 默认值
                         settings.apiUrl      = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-                        settings.modelName   = "qwen3-plus"
+                        settings.modelName   = "qwen3.5-plus"
+                        settings.systemPrompt  = ""
+                        settings.maxToolRounds = 40
+                        settings.showThinking  = false
+                        settings.save()
                     }
                 }
                 Button {
@@ -337,7 +363,6 @@ Window {
         }
     }
 
-    // ── 内部组件：带标签的分组 ───────────────────────────────────────────────
     component SectionBox: ColumnLayout {
         property string label: ""
         property string hint:  ""
@@ -350,7 +375,6 @@ Window {
         }
     }
 
-    // ── 内部组件：输入框 ─────────────────────────────────────────────────────
     component FieldInput: TextField {
         Layout.fillWidth: true
         height: 36
@@ -361,7 +385,6 @@ Window {
         selectByMouse: true
     }
 
-    // ── 内部组件：滑块分组（滑块 + 右侧可编辑数字框）──────────────────────────
     component SliderSection: ColumnLayout {
         property string label:    ""
         property string hint:     ""
@@ -469,4 +492,3 @@ Window {
         }
     }
 }
-

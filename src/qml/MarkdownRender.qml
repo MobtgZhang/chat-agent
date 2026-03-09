@@ -1,4 +1,6 @@
 // qml/MarkdownRender.qml
+// 使用 Qt 内置 TextEdit MarkdownText（不含 LaTeX 时）
+// 含 LaTeX 数学公式时使用 MarkdownMathRender（WebEngineView + KaTeX）
 import QtQuick 2.15
 
 Item {
@@ -7,10 +9,9 @@ Item {
     property color  textColor:    "#DBDEE1"
     property int    fontSize:     14
 
-    implicitHeight: mdText.contentHeight
+    implicitHeight: Math.max(20, mdText.contentHeight)
     height: implicitHeight
 
-    // 直接用 TextEdit：兼容性更好，且支持选中/复制
     TextEdit {
         id: mdText
         anchors.left: parent.left
