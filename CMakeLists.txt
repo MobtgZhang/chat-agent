@@ -69,6 +69,7 @@ qt_add_resources(appAIChat "qml_res"
         src/translations/en.json
         src/translations/ru.json
         src/translations/fr.json
+        src/translations/ja.json
 )
 
 # ── 链接 ─────────────────────────────────────────────────────────────────────
