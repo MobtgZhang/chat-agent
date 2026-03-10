@@ -37,6 +37,7 @@ qt_add_executable(appAIChat
     src/tools/clipboard_tool.h src/tools/clipboard_tool.cpp
     src/tools/wait_tool.h src/tools/wait_tool.cpp
     src/tools/image_match_tool.h src/tools/image_match_tool.cpp
+    src/tools/memory_tool.h src/tools/memory_tool.cpp
     src/clipboard_bridge.h src/clipboard_bridge.cpp
 )
 
