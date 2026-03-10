@@ -50,6 +50,16 @@ Item {
 
     property bool isAI: role === "ai" || role === "assistant"
 
+    function toggleBlockExpanded(i) {
+        var v = (blockExpandedList || []).slice()
+        while (v.length <= i) v.push(true)
+        v[i] = !v[i]
+        blockExpandedList = v
+    }
+    function isBlockExpanded(i) {
+        var v = blockExpandedList || []
+        return i >= v.length || v[i] !== false
+    }
     function hasMath(s) {
         if (!s || typeof s !== "string") return false
         return /\$\$|\$[^\s$]|\\[\[\()\]]/.test(s)
@@ -76,6 +86,7 @@ Item {
     property bool editing:        false
     property bool thinkExpanded:  false
     property bool rewriteThinkExpanded: false  // 重写气泡默认折叠
+    property var blockExpandedList: []  // agent 模式下每个思考块的展开状态 [bool...]
 
     Timer {
         id: ragTimer
@@ -86,11 +97,6 @@ Item {
     }
     onRagSearchStatusChanged: {
         if (ragSearchStatus === "done" || ragSearchStatus === "") root.ragElapsedTime = 0
-    }
-    onIsThinkingChanged: {
-        if (isThinking && settings.showThinking && isAI) {
-            thinkExpanded = true
-        }
     }
     // 用户从关→开切换思考按钮时，若有已记录的思考内容则自动展开显示
     Connections {
@@ -111,6 +117,12 @@ Item {
         id: thinkTimer
         interval: 100; running: root.isThinking; repeat: true
         onTriggered: root.thinkTime += 0.1
+    }
+    onIsThinkingChanged: {
+        if (isThinking) {
+            root.thinkTime = 0  // 每次开始新一轮思考时重置计时
+            if (settings.showThinking && isAI) thinkExpanded = true
+        }
     }
 
     // ChatGPT 风格：用户右对齐，AI 左对齐
@@ -318,11 +330,11 @@ Item {
                 }
             }
 
-            // 思考状态（仅 AI）：思考中 / 思考完成
+            // 思考状态（仅 AI）：思考中 / 思考完成。agent 模式下改为每个思考块自带计时，此处仅 chat 模式显示
             Item {
                 width: parent.width
                 height: 20
-                visible: isAI && (isThinking || thinkTime > 0)
+                visible: isAI && !root.useBlocks && (isThinking || thinkTime > 0)
                 Row {
                     spacing: 6
                     anchors.verticalCenter: parent.verticalCenter
@@ -330,7 +342,7 @@ Item {
                     Text {
                         text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0)
                             ? (isThinking
-                                ? (localeBridge.t.thinkingInProgress || "思考中... ") + thinkTime.toFixed(1) + (localeBridge.t.thinkingSeconds || "s")
+                                ? (localeBridge.t.thinkingInProgress || "思考中... ") + thinkTime.toFixed(1) + (localeBridge.t.thinkingSecondsUnit || "s")
                                 : (localeBridge.t.thinkingDone || "思考完成 (") + thinkTime.toFixed(1) + (localeBridge.t.thinkingSeconds || "s)") +
                                 (settings.showThinking && thinkingContent !== "" ? (thinkExpanded ? "  ▲" : "  ▼") : ""))
                             : (isThinking ? "思考中... " + thinkTime.toFixed(1) + "s" : "思考完成 (" + thinkTime.toFixed(1) + "s)" +
@@ -363,30 +375,69 @@ Item {
                             width: parent.width
                             spacing: 4
 
-                            // 思考块
-                            Rectangle {
+                            // 思考块：带思考中/完成计时 + 可折叠
+                            Column {
+                                id: thinkBlockCol
                                 width: parent.width
-                                visible: modelData.type === "thinking" && (settings.showThinking && modelData.content !== "")
-                                height: visible && thinkBlkLoader.item ? (thinkBlkLoader.item.implicitHeight || thinkBlkLoader.item.height) + 12 : 0
-                                color: root.cThinkBg
-                                radius: 12
-                                border.width: 1
-                                border.color: root.cThinkBorder
-
-                                Loader {
-                                    id: thinkBlkLoader
-                                    anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
-                                    sourceComponent: (root.hasMath(modelData.content) || root.hasCodeBlocks(modelData.content) || root.hasTable(modelData.content)) ? mathRenderComp : mdRenderComp
-                                    onLoaded: {
-                                        item.textColor = root.cMuted
-                                        item.fontSize = 12
+                                visible: modelData.type === "thinking" && settings.showThinking
+                                spacing: 4
+                                property bool isCurrentThinking: modelData.type === "thinking" && index === root.blocks.length - 1 && root.isThinking
+                                property real blockTime: isCurrentThinking ? root.thinkTime : (modelData.durationSec !== undefined ? modelData.durationSec : 0)
+                                Item {
+                                    width: parent.width
+                                    height: 22
+                                    visible: modelData.content !== "" || thinkBlockCol.isCurrentThinking
+                                    Row {
+                                        spacing: 6
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        Text { text: "🧠"; font.pixelSize: 12 }
+                                        Text {
+                                            text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0)
+                                                ? (thinkBlockCol.isCurrentThinking
+                                                    ? (localeBridge.t.thinkingInProgress || "思考中... ") + thinkBlockCol.blockTime.toFixed(1) + (localeBridge.t.thinkingSecondsUnit || "s")
+                                                    : (localeBridge.t.thinkingDone || "思考完成 (") + thinkBlockCol.blockTime.toFixed(1) + (localeBridge.t.thinkingSeconds || "s)"))
+                                                : (thinkBlockCol.isCurrentThinking ? "思考中... " : "思考完成 (") + thinkBlockCol.blockTime.toFixed(1) + "s)"
+                                            color: root.cMuted
+                                            font.pixelSize: 11
+                                            font.italic: true
+                                        }
+                                        Text {
+                                            visible: modelData.content !== ""
+                                            text: root.isBlockExpanded(index) ? "  ▲" : "  ▼"
+                                            color: root.cMuted
+                                            font.pixelSize: 11
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.toggleBlockExpanded(index)
                                     }
                                 }
-                                Binding {
-                                    target: thinkBlkLoader.item
-                                    property: "markdownText"
-                                    value: modelData.content || ""
-                                    when: thinkBlkLoader.item
+                                Rectangle {
+                                    width: parent.width
+                                    visible: modelData.content !== "" && root.isBlockExpanded(index)
+                                    height: visible && thinkBlkLoader.item ? (thinkBlkLoader.item.implicitHeight || thinkBlkLoader.item.height) + 12 : 0
+                                    color: root.cThinkBg
+                                    radius: 12
+                                    border.width: 1
+                                    border.color: root.cThinkBorder
+
+                                    Loader {
+                                        id: thinkBlkLoader
+                                        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
+                                        sourceComponent: (root.hasMath(modelData.content) || root.hasCodeBlocks(modelData.content) || root.hasTable(modelData.content)) ? mathRenderComp : mdRenderComp
+                                        onLoaded: {
+                                            item.textColor = root.cMuted
+                                            item.fontSize = 12
+                                        }
+                                    }
+                                    Binding {
+                                        target: thinkBlkLoader.item
+                                        property: "markdownText"
+                                        value: modelData.content || ""
+                                        when: thinkBlkLoader.item
+                                    }
                                 }
                             }
 
@@ -436,11 +487,21 @@ Item {
                                     anchors.bottomMargin: 8
                                     spacing: 6
 
-                                    Text {
-                                        text: "🔧 " + (modelData.toolName || "")
-                                        color: root.cMuted
-                                        font.pixelSize: 12
-                                        font.bold: true
+                                    Row {
+                                        spacing: 8
+                                        Text {
+                                            text: "🔧 " + (modelData.toolName || "")
+                                            color: root.cMuted
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            visible: modelData.durationSec !== undefined
+                                            text: "执行 " + (modelData.durationSec !== undefined ? modelData.durationSec.toFixed(1) : "0") + "s"
+                                            color: root.cMuted
+                                            font.pixelSize: 11
+                                            font.italic: true
+                                        }
                                     }
                                     Text {
                                         width: parent.width

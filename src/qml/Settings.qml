@@ -475,10 +475,10 @@ Window {
                             id: searchEngineCombo
                             Layout.fillWidth: true
                             Layout.preferredHeight: 36
-                            readonly property var engineList: ["duckduckgo", "bing", "brave", "google", "tencent"]
+                            readonly property var engineList: ["duckduckgo", "baidu", "bing", "brave", "google", "tencent"]
                             readonly property var engineNames: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0)
-                                ? [localeBridge.t.searchEngineDuckDuckGo, localeBridge.t.searchEngineBing, localeBridge.t.searchEngineBrave, localeBridge.t.searchEngineGoogle, localeBridge.t.searchEngineTencent]
-                                : ["DuckDuckGo", "Bing Search", "Brave Search", "Google", "Tencent Search"]
+                                ? [localeBridge.t.searchEngineDuckDuckGo, localeBridge.t.searchEngineBaidu, localeBridge.t.searchEngineBing, localeBridge.t.searchEngineBrave, localeBridge.t.searchEngineGoogle, localeBridge.t.searchEngineTencent]
+                                : ["DuckDuckGo", "Baidu", "Bing Search", "Brave Search", "Google", "Tencent Search"]
                             model: engineList
                             currentIndex: {
                                 var idx = engineList.indexOf(settings.searchEngine)
@@ -511,11 +511,11 @@ Window {
                                 }
                             }
                         }
-                        // Bing/Brave/Google API Key（选 bing=1, brave=2, google=3 时显示）
+                        // Bing/Brave/Google API Key（选 bing=2, brave=3, google=4 时显示）
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
-                            visible: searchEngineCombo.currentIndex >= 1 && searchEngineCombo.currentIndex <= 3
+                            visible: searchEngineCombo.currentIndex >= 2 && searchEngineCombo.currentIndex <= 4
                             FieldInput {
                                 id: webSearchApiKeyField
                                 Layout.fillWidth: true
@@ -532,11 +532,11 @@ Window {
                                 onClicked: webSearchApiKeyField.echoMode = (webSearchApiKeyField.echoMode === TextInput.Password) ? TextInput.Normal : TextInput.Password
                             }
                         }
-                        // 腾讯 SecretId + SecretKey（选 tencent=4 时显示）
+                        // 腾讯 SecretId + SecretKey（选 tencent=5 时显示）
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
-                            visible: searchEngineCombo.currentIndex === 4
+                            visible: searchEngineCombo.currentIndex === 5
                             FieldInput {
                                 id: tencentSecretIdField
                                 Layout.fillWidth: true

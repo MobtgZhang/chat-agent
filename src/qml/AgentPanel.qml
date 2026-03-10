@@ -105,6 +105,73 @@ Rectangle {
                 }
             }
 
+            // 已学 SOP（自进化）
+            Text {
+                text: "📚 已学 SOP"
+                color: cText
+                font.pixelSize: 12
+                font.bold: true
+                visible: agentMemory && agentMemory.sopsList && agentMemory.sopsList.length > 0
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 60
+                visible: agentMemory && agentMemory.sopsList && agentMemory.sopsList.length > 0
+                clip: true
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                ListView {
+                    model: agentMemory ? agentMemory.sopsList : []
+                    spacing: 2
+                    delegate: Rectangle {
+                        width: ListView.view.width - 4
+                        height: 28
+                        radius: 4
+                        color: sopHover.hovered ? cHighlight : "transparent"
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 4
+                            spacing: 4
+                            Text {
+                                text: modelData.name
+                                color: cAccent
+                                font.pixelSize: 10
+                                font.bold: true
+                                Layout.preferredWidth: 90
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: "×" + modelData.usage_count
+                                color: cMuted
+                                font.pixelSize: 10
+                            }
+                            Text {
+                                property string s: modelData.summary ? String(modelData.summary) : ""
+                                text: s.length > 35 ? s.substring(0, 35) + "…" : s
+                                color: cMuted
+                                font.pixelSize: 10
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: "×"
+                                color: sopDelHover.hovered ? "#ED4245" : cMuted
+                                font.pixelSize: 12
+                                HoverHandler { id: sopDelHover }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (agentMemory)
+                                            agentMemory.removeSop(modelData.name)
+                                    }
+                                }
+                            }
+                        }
+                        HoverHandler { id: sopHover }
+                    }
+                }
+            }
+
             // 记忆列表
             ScrollView {
                 Layout.fillWidth: true
