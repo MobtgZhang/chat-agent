@@ -50,5 +50,15 @@ echo "========================================"
 export LD_LIBRARY_PATH="${QT_INSTALL_DIR}/lib:${LD_LIBRARY_PATH}"
 export QML2_IMPORT_PATH="${QT_INSTALL_DIR}/qml:${QML2_IMPORT_PATH}"
 
-# 执行编译出的程序
-QT_IM_MODULE=fcitx5 ./${EXECUTABLE_NAME}
+# 输入法：需让 Qt 找到系统安装的 fcitx5 插件。注意：自定义 Qt 的 plugins 必须放最前，
+# 否则会错误加载系统 Qt 的 sqldrivers/ssl 等，导致 QSQLITE/TLS 失败和 Segmentation fault
+_im_plugin_paths=""
+for d in /usr/lib/x86_64-linux-gnu/qt6/plugins /usr/lib64/qt6/plugins /usr/lib/qt6/plugins; do
+    [ -d "$d" ] && _im_plugin_paths="${_im_plugin_paths}${_im_plugin_paths:+:}$d"
+done
+[ -n "$_im_plugin_paths" ] && export QT_PLUGIN_PATH="${QT_INSTALL_DIR}/plugins:${_im_plugin_paths}${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+export QT_IM_MODULES="fcitx5;fcitx;wayland;ibus"
+export QT_IM_MODULE=fcitx5
+export XMODIFIERS=@im=fcitx
+
+./${EXECUTABLE_NAME}
