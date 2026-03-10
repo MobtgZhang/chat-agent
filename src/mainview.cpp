@@ -5,6 +5,7 @@
 #include "llm_backend.h"
 #include "memory_module.h"
 #include "tool_registry.h"
+#include "web_search_service.h"
 #include "tools/file_tool.h"
 #include "tools/shell_tool.h"
 #include "tools/websearch_tool.h"
@@ -20,12 +21,17 @@
 #include <QFile>
 #include <QTextStream>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QNetworkRequest>
 #include <QDebug>
 #include <QDateTime>
+#include <QTimer>
+#include <QtConcurrent>
+#include <QFutureWatcher>
+#include <QMap>
 
 // ── 构造 ──────────────────────────────────────────────────────────────────────
 MainView::MainView(Settings *settings, History *history, QObject *parent)
@@ -56,7 +62,7 @@ void MainView::appendMessage(const QVariantMap &msg) {
 }
 
 // ── 会话管理 ──────────────────────────────────────────────────────────────────
-void MainView::newSession(const QString &name) {
+void MainView::newSession(const QString &name, bool addWelcome) {
     if (m_activeReply) m_activeReply->abort();
 
     QString sessionName = name.isEmpty()
@@ -68,15 +74,17 @@ void MainView::newSession(const QString &name) {
     m_sessionName    = sessionName;
     m_messagesModel.clearAll();
 
-    // 添加 system 欢迎消息
-    QVariantMap welcome;
-    welcome["role"]      = "ai";
-    welcome["content"]   = QString("你好！我是 **%1**，有什么可以帮助你的吗？")
-                           .arg(m_settings->modelName());
-    welcome["thinking"]  = "";
-    welcome["isThinking"]= false;
-    welcome["id"]        = "welcome";
-    m_messagesModel.appendOne(welcome);
+    // 可选：添加欢迎消息
+    if (addWelcome) {
+        QVariantMap welcome;
+        welcome["role"]      = "ai";
+        welcome["content"]   = QString("你好！我是 **%1**，有什么可以帮助你的吗？")
+                               .arg(m_settings->modelName());
+        welcome["thinking"]  = "";
+        welcome["isThinking"]= false;
+        welcome["id"]        = "welcome";
+        m_messagesModel.appendOne(welcome);
+    }
     emit currentSessionChanged();
     emit sessionNameChanged();
     saveCurrentSession();
@@ -90,8 +98,10 @@ void MainView::loadSession(const QString &id) {
 }
 
 void MainView::clearMessages() {
-    // 清空 = 新建对话，旧对话保留在历史中（不删除）；删除对话用历史列表右键删除
-    newSession(QString());
+    // 清空 = 删除当前会话历史 + 新建空对话（无欢迎消息）
+    if (!m_currentSession.isEmpty())
+        m_history->deleteNode(m_currentSession);
+    newSession(QString(), false);  // 不添加"你好XXX"欢迎消息
 }
 
 void MainView::setChatMode(const QString &mode) {
@@ -107,6 +117,7 @@ void MainView::setupAgent() {
     m_agentMemory = new MemoryModule(this);
 
     LLMBackend *llm = new LLMBackend(this);
+    m_llmBackend = llm;
     llm->setApiKey(m_settings->apiKey());
     llm->setApiUrl(m_settings->apiUrl());
     llm->setModel(m_settings->modelName());
@@ -115,9 +126,10 @@ void MainView::setupAgent() {
     connect(m_settings, &Settings::modelNameChanged, this, [this, llm]() { llm->setModel(m_settings->modelName()); });
 
     ToolRegistry *reg = new ToolRegistry(this);
+    m_toolRegistry = reg;
     reg->registerTool(new FileTool(reg));
     reg->registerTool(new ShellTool(reg));
-    reg->registerTool(new WebSearchTool(reg));
+    reg->registerTool(new WebSearchTool(m_settings, reg));
     reg->registerTool(new KeyboardTool(reg));
     reg->registerTool(new OcrTool(reg));
     reg->registerTool(new WindowTool(reg));
@@ -135,13 +147,24 @@ void MainView::setupAgent() {
     connect(m_settings, &Settings::maxToolRoundsChanged, this, [this]() { m_agentCore->setMaxToolRounds(m_settings->maxToolRounds()); });
 
     connect(m_agentCore, &AgentCore::chunkReceived, this, [this](const QString &content, const QString &reasoning, bool isThinking) {
-        updateLastAiMessage(reasoning, content, isThinking);
+        if (m_chatMode == "agent" || m_chatMode == "planning")
+            m_messagesModel.updateLastAiMessageAgent(reasoning, content, isThinking);
+        else
+            updateLastAiMessage(reasoning, content, isThinking);
+    });
+    connect(m_agentCore, &AgentCore::toolExecuted, this, [this](const QString &toolName, const QVariantMap &args, const QString &result) {
+        m_messagesModel.appendToolBlockToLastAiMessage(toolName, args, result);
     });
     connect(m_agentCore, &AgentCore::finished, this, [this]() {
         setIsStreaming(false);
-        autoNameCurrentSession();
-        saveCurrentSession();
-        m_history->touchSession(m_currentSession);
+        const QString sessionId = m_currentSession;
+        // 延迟执行保存等耗时操作到下一事件循环，避免阻塞 UI 主线程导致界面卡死
+        QTimer::singleShot(0, this, [this, sessionId]() {
+            if (m_currentSession != sessionId) return;  // 用户已切换会话
+            autoNameCurrentSession();
+            saveCurrentSession();
+            m_history->touchSession(sessionId);
+        });
     });
     connect(m_agentCore, &AgentCore::errorOccurred, this, &MainView::errorOccurred);
 }
@@ -176,9 +199,26 @@ bool MainView::exportCurrentChat(const QString &filePath) {
             out << "## 用户\n\n" << content << "\n\n";
         } else if (role == "ai") {
             out << "## 助手\n\n";
-            if (!thinking.isEmpty())
-                out << "### 思考过程\n\n" << thinking << "\n\n";
-            out << content << "\n\n";
+            QVariantList blocks = m["blocks"].toList();
+            if (!blocks.isEmpty()) {
+                for (const QVariant &bv : blocks) {
+                    QVariantMap b = bv.toMap();
+                    QString t = b["type"].toString();
+                    QString c = b["content"].toString();
+                    if (t == "thinking" && !c.isEmpty())
+                        out << "### 思考过程\n\n" << c << "\n\n";
+                    else if (t == "reply" && !c.isEmpty())
+                        out << "### 回复\n\n" << c << "\n\n";
+                    else if (t == "tool") {
+                        out << "### 工具: " << b["toolName"].toString() << "\n\n";
+                        out << "结果:\n```\n" << b["result"].toString() << "\n```\n\n";
+                    }
+                }
+            } else {
+                if (!thinking.isEmpty())
+                    out << "### 思考过程\n\n" << thinking << "\n\n";
+                out << content << "\n\n";
+            }
         }
     }
 
@@ -200,22 +240,47 @@ void MainView::editAndRegenerate(int index, const QString &content) {
     if (index < 0 || index >= m_messagesModel.size() || m_isStreaming) return;
     QVariantMap msg = m_messagesModel.at(index);
     const QString role = msg["role"].toString();
-
-    msg["content"] = content.trimmed();
-    m_messagesModel.replaceAtRow(index, msg);
+    const QString newContent = content.trimmed();
 
     if (role == QLatin1String("user")) {
-        // 用户消息：截断该条之后，重新发起请求
-        m_messagesModel.truncateTo(index + 1);
+        // 用户消息：将修改追加为历史树的新节点（会保存当前 tail 并截断）
+        if (newContent != msg["content"].toString())
+            m_messagesModel.appendEditHistoryNode(index, newContent, -1);
+        // appendEditHistoryNode 内部已 truncateTo，此处无需再截断
+    } else {
+        msg["content"] = newContent;
+        m_messagesModel.replaceAtRow(index, msg);
+    }
+
+    if (role == QLatin1String("user")) {
         if (m_chatMode == "chat") {
-            startApiCall(m_messagesModel.toVariantList());
+            if (m_settings->chatOnline()) {
+                QVariantMap aiMsg;
+                aiMsg["role"]         = "ai";
+                aiMsg["content"]       = "";
+                aiMsg["thinking"]      = "";
+                aiMsg["isThinking"]    = true;
+                aiMsg["ragSearchStatus"] = "searching";
+                aiMsg["id"]            = QString::number(QDateTime::currentMSecsSinceEpoch());
+                m_messagesModel.appendOne(aiMsg);
+                setIsStreaming(true);
+                startRagFetchAndApiCall(newContent);
+            } else {
+                startApiCall(m_messagesModel.toVariantList(), QString());
+            }
         } else {
-            startAgentCall(content.trimmed());
+            startAgentCall(newContent);
         }
     } else {
         // AI 消息：仅保存修改，不重新生成
         saveCurrentSession();
     }
+}
+
+void MainView::setUserMessageVersion(int index, int dfsPosition) {
+    if (index < 0 || index >= m_messagesModel.size()) return;
+    m_messagesModel.setUserMessageEditIndex(index, dfsPosition);
+    saveCurrentSession();
 }
 
 void MainView::deleteMessage(int index) {
@@ -246,7 +311,25 @@ void MainView::resendFrom(int index) {
     for (int i = m_messagesModel.size() - 1; i >= 0; --i) {
         QVariantMap msg = m_messagesModel.at(i);
         if (msg["role"].toString() == "user") {
-            startApiCall(m_messagesModel.toVariantList());
+            QString userContent = msg["content"].toString();
+            if (m_chatMode == "chat") {
+                if (m_settings->chatOnline()) {
+                    QVariantMap aiMsg;
+                    aiMsg["role"]         = "ai";
+                    aiMsg["content"]      = "";
+                    aiMsg["thinking"]     = "";
+                    aiMsg["isThinking"]   = true;
+                    aiMsg["ragSearchStatus"] = "searching";
+                    aiMsg["id"]           = QString::number(QDateTime::currentMSecsSinceEpoch());
+                    m_messagesModel.appendOne(aiMsg);
+                    setIsStreaming(true);
+                    startRagFetchAndApiCall(userContent);
+                } else {
+                    startApiCall(m_messagesModel.toVariantList(), QString());
+                }
+            } else {
+                startAgentCall(userContent);
+            }
             return;
         }
     }
@@ -285,7 +368,21 @@ void MainView::sendMessage(const QString &text) {
     }
 
     if (m_chatMode == "chat") {
-        startApiCall(m_messagesModel.toVariantList());
+        if (m_settings->chatOnline()) {
+            // 联网：先添加 AI 占位并显示「搜索中」，异步 RAG 完成后显示「搜索结束」再发起 API
+            QVariantMap aiMsg;
+            aiMsg["role"]         = "ai";
+            aiMsg["content"]      = "";
+            aiMsg["thinking"]     = "";
+            aiMsg["isThinking"]   = true;
+            aiMsg["ragSearchStatus"] = "searching";
+            aiMsg["id"]           = QString::number(QDateTime::currentMSecsSinceEpoch());
+            m_messagesModel.appendOne(aiMsg);
+            setIsStreaming(true);
+            startRagFetchAndApiCall(text.trimmed());
+        } else {
+            startApiCall(m_messagesModel.toVariantList(), QString());
+        }
     } else {
         startAgentCall(text.trimmed());
     }
@@ -298,6 +395,7 @@ void MainView::startAgentCall(const QString &userInput) {
     aiMsg["content"]   = "";
     aiMsg["thinking"]  = "";
     aiMsg["isThinking"]= true;
+    aiMsg["blocks"]    = QVariantList{};
     aiMsg["id"]        = QString::number(QDateTime::currentMSecsSinceEpoch());
     m_messagesModel.appendOne(aiMsg);
     setIsStreaming(true);
@@ -334,9 +432,126 @@ void MainView::stopGeneration() {
     saveCurrentSession();
 }
 
+// ── RAG 异步检索（ChatGPT 风格：搜索 + 抓取网页正文）──────────────────────────
+// 参考 MindSearch：History + Query Rewrite → 搜索。有历史时用 LLM 改写，否则直接搜索
+void MainView::startRagFetchAndApiCall(const QString &userQuery) {
+    if (userQuery.isEmpty()) {
+        m_messagesModel.updateLastAiMessageRagSearchStatus("done");
+        doStartApiCall(QString());
+        return;
+    }
+    QString conversationContext = WebSearchService::buildConversationContextFromMessages(
+        m_messagesModel.toVariantList(), true);
+
+    // Query Rewrite：有对话历史时，用 LLM 将「历史+当前问题」改写为适合搜索引擎的 query
+    if (!conversationContext.isEmpty() && m_llmBackend && !m_settings->apiKey().trimmed().isEmpty()) {
+        m_messagesModel.updateLastAiMessageRagSearchStatus("rewriting");
+        const QString sysPrompt = QStringLiteral(
+            "你是一个搜索查询改写助手。根据「主问题」「历史对话」和「当前问题」，输出适合搜索引擎的查询。\n"
+            "要求：1) 解决指代（它、这个、that 等），用具体名词替换；2) 保持简洁，每个子查询为单一问题；3) 若有多个子查询用分号分隔；4) 只输出查询内容，不要解释或其他文字。");
+        QVariantMap userMsg;
+        userMsg["role"] = QStringLiteral("user");
+        userMsg["content"] = conversationContext + QStringLiteral("\n\n当前问题：") + userQuery;
+        QVariantList msgs;
+        msgs.append(userMsg);
+
+        // 一次性连接（SingleShotConnection）：收到改写结果或错误后执行搜索
+        qint64 rewriteStart = QDateTime::currentMSecsSinceEpoch();
+        connect(m_llmBackend, &LLMBackend::completeReceived, this,
+            [this, userQuery, rewriteStart](const QString &rewritten, const QString &reasoning) {
+                int dur = int(QDateTime::currentMSecsSinceEpoch() - rewriteStart);
+                QString q = rewritten.trimmed();
+                if (q.length() > 500) q = q.left(500).trimmed();
+                QString think = reasoning.trimmed();
+                if (think.isEmpty()) think = QStringLiteral("改写结果：") + (q.isEmpty() ? userQuery : q);
+                onQueryRewriteDone(userQuery, q.isEmpty() ? userQuery : q, dur, think);
+            }, Qt::SingleShotConnection);
+        connect(m_llmBackend, &LLMBackend::errorOccurred, this,
+            [this, userQuery, conversationContext, rewriteStart](const QString &) {
+                int dur = int(QDateTime::currentMSecsSinceEpoch() - rewriteStart);
+                QString fallback = WebSearchService::buildContextualSearchQuery(conversationContext, userQuery);
+                onQueryRewriteDone(userQuery, fallback.isEmpty() ? userQuery : fallback, dur, QStringLiteral("回退规则改写"));
+            }, Qt::SingleShotConnection);
+        m_llmBackend->chatComplete(msgs, sysPrompt);
+        return;
+    }
+
+    // 无历史或无可用 LLM：直接搜索，使用规则-based 改写（若有 context）
+    QString effectiveQuery = userQuery;
+    if (!conversationContext.isEmpty())
+        effectiveQuery = WebSearchService::buildContextualSearchQuery(conversationContext, userQuery);
+    if (effectiveQuery.isEmpty()) effectiveQuery = userQuery;
+    onQueryRewriteDone(userQuery, effectiveQuery, 0, QString());
+}
+
+void MainView::onQueryRewriteDone(const QString &userQuery, const QString &rewrittenQuery,
+                                 int rewriteDurationMs, const QString &rewriteThinking) {
+    m_messagesModel.updateLastAiMessageRagSearchStatus("searching");
+    QString engine = m_settings->searchEngine().trimmed().toLower();
+    if (engine != QLatin1String("duckduckgo") && engine != QLatin1String("bing")
+        && engine != QLatin1String("brave") && engine != QLatin1String("google")
+        && engine != QLatin1String("tencent")) {
+        engine = QStringLiteral("duckduckgo");
+    }
+    QString proxyMode = m_settings->proxyMode().trimmed().toLower();
+    QString proxyUrl = m_settings->proxyUrl().trimmed();
+    if (proxyMode != QLatin1String("system") && proxyMode != QLatin1String("manual"))
+        proxyMode = QStringLiteral("off");
+    QString apiKey = m_settings->webSearchApiKey().trimmed();
+    QString tcId = m_settings->tencentSecretId().trimmed();
+    QString tcKey = m_settings->tencentSecretKey().trimmed();
+
+    qint64 searchStart = QDateTime::currentMSecsSinceEpoch();
+    using ResultType = QVector<SearchResult>;
+    auto *watcher = new QFutureWatcher<ResultType>(this);
+    connect(watcher, &QFutureWatcher<ResultType>::finished, this,
+        [this, watcher, userQuery, rewriteDurationMs, rewriteThinking, searchStart]() {
+            watcher->deleteLater();
+            int searchDur = int(QDateTime::currentMSecsSinceEpoch() - searchStart);
+            onRagSearchDone(userQuery, watcher->result(), rewriteDurationMs, rewriteThinking, searchDur);
+        });
+    watcher->setFuture(QtConcurrent::run([rewrittenQuery, engine, proxyMode, proxyUrl, apiKey, tcId, tcKey]() {
+        return WebSearchService::searchWithContent(rewrittenQuery, engine, proxyMode, proxyUrl, nullptr, 5, apiKey, tcId, tcKey);
+    }));
+}
+
+void MainView::onRagSearchDone(const QString &userQuery,
+                               const QVector<SearchResult> &results,
+                               int rewriteDurationMs, const QString &rewriteThinking, int searchDurationMs) {
+    QString ragContext;
+    QVariantList ragLinks;
+
+    if (results.isEmpty()) {
+        ragContext = QString();
+    } else {
+        // ChatGPT 风格：编号引用 [1] [2]...，含标题、URL、正文摘要
+        QStringList parts;
+        for (int i = 0; i < results.size(); ++i) {
+            const SearchResult &r = results.at(i);
+            QString block = QStringLiteral("[%1] %2\n%3")
+                .arg(i + 1)
+                .arg(r.title)
+                .arg(r.snippet.isEmpty() ? r.title : r.snippet);
+            parts << block;
+            ragLinks.append(QVariantMap{
+                {QStringLiteral("text"), r.title},
+                {QStringLiteral("url"), r.url},
+                {QStringLiteral("snippet"), r.snippet},
+                {QStringLiteral("index"), i + 1}
+            });
+        }
+        ragContext = parts.join(QStringLiteral("\n\n"));
+    }
+
+    m_messagesModel.updateLastAiMessageRagSearchStatus("done");
+    m_messagesModel.updateLastAiMessageRagLinks(ragLinks);
+    m_messagesModel.updateLastAiMessageRagMeta(rewriteDurationMs, rewriteThinking, searchDurationMs);
+    doStartApiCall(ragContext);
+}
+
 // ── 核心：发起 API 请求 ───────────────────────────────────────────────────────
-void MainView::startApiCall(const QVariantList & /*history*/) {
-    // 添加 AI 占位消息
+void MainView::startApiCall(const QVariantList & /*history*/, const QString &ragContext) {
+    // 添加 AI 占位消息（非 RAG 路径）
     QVariantMap aiMsg;
     aiMsg["role"]      = "ai";
     aiMsg["content"]   = "";
@@ -345,7 +560,10 @@ void MainView::startApiCall(const QVariantList & /*history*/) {
     aiMsg["id"]        = QString::number(QDateTime::currentMSecsSinceEpoch());
     m_messagesModel.appendOne(aiMsg);
     setIsStreaming(true);
+    doStartApiCall(ragContext);
+}
 
+void MainView::doStartApiCall(const QString &ragContext) {
     // 构造请求
     // 构造请求：根据 apiUrl 推导出 /chat/completions 地址
     QUrl apiUrl(m_settings->apiUrl());
@@ -387,8 +605,14 @@ void MainView::startApiCall(const QVariantList & /*history*/) {
 
     // 构建 messages 数组（system + 历史）
     QJsonArray msgs;
-    if (!m_settings->systemPrompt().trimmed().isEmpty())
-        msgs.append(QJsonObject{{"role","system"},{"content",m_settings->systemPrompt()}});
+    QString systemContent = m_settings->systemPrompt().trimmed();
+    if (!ragContext.isEmpty())
+        systemContent = (systemContent.isEmpty() ? QString() : systemContent + "\n\n")
+            + QStringLiteral("【联网检索结果】以下是从网络搜索并抓取的网页内容，请据此回答用户问题。"
+                             "回答时请注明引用来源，使用 [1]、[2] 等编号对应下方各条。每条格式为 [编号] 标题 + 正文摘要。\n\n")
+            + ragContext;
+    if (!systemContent.isEmpty())
+        msgs.append(QJsonObject{{"role","system"},{"content",systemContent}});
 
     const QVariantList snapshot = m_messagesModel.toVariantList();
     for (const QVariant &v : snapshot) {
@@ -414,9 +638,14 @@ void MainView::startApiCall(const QVariantList & /*history*/) {
             if (data == "[DONE]") {
                 updateLastAiMessage("", "", false);
                 setIsStreaming(false);
-                autoNameCurrentSession();
-                saveCurrentSession();
-                m_history->touchSession(m_currentSession);
+                const QString sessionId = m_currentSession;
+                // 延迟执行保存等耗时操作到下一事件循环，避免阻塞 UI 主线程导致界面卡死
+                QTimer::singleShot(0, this, [this, sessionId]() {
+                    if (m_currentSession != sessionId) return;  // 用户已切换会话
+                    autoNameCurrentSession();
+                    saveCurrentSession();
+                    m_history->touchSession(sessionId);
+                });
                 return;
             }
 
@@ -444,7 +673,12 @@ void MainView::startApiCall(const QVariantList & /*history*/) {
             emit errorOccurred(reply->errorString());
         }
         setIsStreaming(false);
-        saveCurrentSession();
+        const QString sessionId = m_currentSession;
+        // 延迟执行保存到下一事件循环，避免阻塞 UI 主线程
+        QTimer::singleShot(0, this, [this, sessionId]() {
+            if (m_currentSession != sessionId) return;
+            saveCurrentSession();
+        });
         reply->deleteLater();
         if (m_activeReply == reply) m_activeReply = nullptr;
     });
@@ -458,19 +692,124 @@ void MainView::updateLastAiMessage(const QString &reasoningChunk,
 }
 
 // ── 持久化 ────────────────────────────────────────────────────────────────────
+static QJsonObject messageToJson(const QVariantMap &m) {
+    QJsonObject o;
+    o["role"]       = m["role"].toString();
+    o["content"]    = m["content"].toString();
+    o["thinking"]   = m["thinking"].toString();
+    o["isThinking"] = false;
+    o["id"]         = m["id"].toString();
+    o["ragSearchStatus"] = m["ragSearchStatus"].toString();
+    if (m.contains("rewriteDurationMs")) o["rewriteDurationMs"] = m["rewriteDurationMs"].toInt();
+    if (m.contains("rewriteThinking")) o["rewriteThinking"] = m["rewriteThinking"].toString();
+    if (m.contains("searchDurationMs")) o["searchDurationMs"] = m["searchDurationMs"].toInt();
+    if (m.contains("ragLinks")) {
+        QJsonArray linksArr;
+        for (const QVariant &lv : m["ragLinks"].toList()) {
+            QVariantMap lm = lv.toMap();
+            QJsonObject lo;
+            lo["text"] = lm["text"].toString();
+            lo["url"] = lm["url"].toString();
+            if (lm.contains("snippet")) lo["snippet"] = lm["snippet"].toString();
+            if (lm.contains("index")) lo["index"] = lm["index"].toInt();
+            linksArr.append(lo);
+        }
+        o["ragLinks"] = linksArr;
+    }
+    if (m.contains("blocks")) {
+        QJsonArray blocksArr;
+        for (const QVariant &b : m["blocks"].toList()) {
+            QVariantMap bm = b.toMap();
+            QJsonObject bo;
+            bo["type"] = bm["type"].toString();
+            bo["content"] = bm["content"].toString();
+            if (bm.contains("toolName")) {
+                bo["toolName"] = bm["toolName"].toString();
+                bo["result"] = bm["result"].toString();
+                bo["args"] = QJsonObject::fromVariantMap(bm["args"].toMap());
+            }
+            blocksArr.append(bo);
+        }
+        o["blocks"] = blocksArr;
+    }
+    return o;
+}
+
+static QVariantMap jsonToMessage(const QJsonObject &o) {
+    QVariantMap msg;
+    QString role = o["role"].toString();
+    msg["role"] = (role == QLatin1String("assistant")) ? QStringLiteral("ai") : role;
+    msg["content"] = o["content"].toString();
+    msg["thinking"] = o["thinking"].toString();
+    msg["isThinking"] = false;
+    msg["id"] = o["id"].toString();
+    msg["ragSearchStatus"] = o["ragSearchStatus"].toString();
+    if (o.contains("rewriteDurationMs")) msg["rewriteDurationMs"] = o["rewriteDurationMs"].toInt();
+    if (o.contains("rewriteThinking")) msg["rewriteThinking"] = o["rewriteThinking"].toString();
+    if (o.contains("searchDurationMs")) msg["searchDurationMs"] = o["searchDurationMs"].toInt();
+    if (o.contains("ragLinks")) {
+        QVariantList links;
+        for (const QJsonValue &lv : o["ragLinks"].toArray()) {
+            QJsonObject lm = lv.toObject();
+            QVariantMap linkMap;
+            linkMap["text"] = lm["text"].toString();
+            linkMap["url"] = lm["url"].toString();
+            if (lm.contains("snippet")) linkMap["snippet"] = lm["snippet"].toString();
+            if (lm.contains("index")) linkMap["index"] = lm["index"].toInt();
+            links.append(linkMap);
+        }
+        msg["ragLinks"] = links;
+    }
+    if (o.contains("blocks")) {
+        QVariantList blocks;
+        for (const QJsonValue &b : o["blocks"].toArray()) {
+            QJsonObject bo = b.toObject();
+            QVariantMap bm;
+            bm["type"] = bo["type"].toString();
+            bm["content"] = bo["content"].toString();
+            if (bo.contains("toolName")) {
+                bm["toolName"] = bo["toolName"].toString();
+                bm["result"] = bo["result"].toString();
+                bm["args"] = bo["args"].toObject().toVariantMap();
+            }
+            blocks.append(bm);
+        }
+        msg["blocks"] = blocks;
+    }
+    return msg;
+}
+
 void MainView::saveCurrentSession() {
     if (m_currentSession.isEmpty()) return;
 
     QJsonArray arr;
     const QVariantList list = m_messagesModel.toVariantList();
-    for (const QVariant &v : list) {
-        const QVariantMap m = v.toMap();
-        QJsonObject o;
-        o["role"]       = m["role"].toString();
-        o["content"]    = m["content"].toString();
-        o["thinking"]   = m["thinking"].toString();
-        o["isThinking"] = false;   // 持久化时总是已完成
-        o["id"]         = m["id"].toString();
+    for (int idx = 0; idx < list.size(); ++idx) {
+        QVariantMap m = list.at(idx).toMap();
+        QJsonObject o = messageToJson(m);
+        if (m.contains("editHistory")) {
+            QJsonArray histArr;
+            for (const QVariant &h : m["editHistory"].toList()) {
+                QVariantMap hm = h.toMap();
+                QJsonObject ho;
+                ho["content"] = hm["content"].toString();
+                ho["parentIndex"] = hm["parentIndex"].toInt();
+                histArr.append(ho);
+            }
+            o["editHistory"] = histArr;
+            o["currentEditIndex"] = m["currentEditIndex"].toInt();
+        }
+        if (m.contains("branchTails")) {
+            QJsonArray tailsArr;
+            for (const QVariant &t : m["branchTails"].toList()) {
+                QJsonArray msgArr;
+                for (const QVariant &em : t.toList()) {
+                    msgArr.append(messageToJson(em.toMap()));
+                }
+                tailsArr.append(msgArr);
+            }
+            o["branchTails"] = tailsArr;
+        }
         arr.append(o);
     }
 
@@ -501,7 +840,6 @@ void MainView::loadSessionFile(const QString &id) {
     for (const QJsonValue &v : root["messages"].toArray()) {
         QJsonObject o = v.toObject();
         QVariantMap msg;
-        // 兼容旧数据：将 OpenAI 风格的 assistant 角色归一化为 ai
         {
             const QString role = o["role"].toString();
             msg["role"] = (role == QLatin1String("assistant")) ? QStringLiteral("ai") : role;
@@ -510,12 +848,87 @@ void MainView::loadSessionFile(const QString &id) {
         msg["thinking"]   = o["thinking"].toString();
         msg["isThinking"] = false;
         msg["id"]         = o["id"].toString();
+        msg["ragSearchStatus"] = o["ragSearchStatus"].toString();
+        if (o.contains("rewriteDurationMs")) msg["rewriteDurationMs"] = o["rewriteDurationMs"].toInt();
+        if (o.contains("rewriteThinking")) msg["rewriteThinking"] = o["rewriteThinking"].toString();
+        if (o.contains("searchDurationMs")) msg["searchDurationMs"] = o["searchDurationMs"].toInt();
+        if (o.contains("ragLinks")) {
+            QVariantList links;
+            for (const QJsonValue &lv : o["ragLinks"].toArray()) {
+                QJsonObject lm = lv.toObject();
+                QVariantMap linkMap;
+                linkMap["text"] = lm["text"].toString();
+                linkMap["url"] = lm["url"].toString();
+                if (lm.contains("snippet")) linkMap["snippet"] = lm["snippet"].toString();
+                if (lm.contains("index")) linkMap["index"] = lm["index"].toInt();
+                links.append(linkMap);
+            }
+            msg["ragLinks"] = links;
+        }
+        if (o.contains("blocks")) {
+            QVariantList blocks;
+            for (const QJsonValue &b : o["blocks"].toArray()) {
+                QJsonObject bo = b.toObject();
+                QVariantMap bm;
+                bm["type"] = bo["type"].toString();
+                bm["content"] = bo["content"].toString();
+                if (bo.contains("toolName")) {
+                    bm["toolName"] = bo["toolName"].toString();
+                    bm["result"] = bo["result"].toString();
+                    bm["args"] = bo["args"].toObject().toVariantMap();
+                }
+                blocks.append(bm);
+            }
+            msg["blocks"] = blocks;
+        }
+        if (o.contains("editHistory")) {
+            QVariantList hist;
+            for (const QJsonValue &h : o["editHistory"].toArray()) {
+                QJsonObject ho = h.toObject();
+                QVariantMap hm;
+                hm["content"] = ho["content"].toString();
+                hm["parentIndex"] = ho["parentIndex"].toInt();
+                hist.append(hm);
+            }
+            msg["editHistory"] = hist;
+            msg["currentEditIndex"] = o["currentEditIndex"].toInt(0);
+            if (o.contains("branchTails")) {
+                QVariantList tails;
+                for (const QJsonValue &t : o["branchTails"].toArray()) {
+                    QVariantList msgList;
+                    for (const QJsonValue &em : t.toArray()) {
+                        msgList.append(jsonToMessage(em.toObject()));
+                    }
+                    tails.append(msgList);
+                }
+                msg["branchTails"] = tails;
+            }
+        }
         m_messagesModel.appendOne(msg);
     }
 }
 
 QVariantList MainView::buildApiMessages() const {
     return m_messagesModel.toVariantList();
+}
+
+QString MainView::fetchRagContext(const QString &userQuery) const {
+    if (!m_settings->chatOnline() || !m_toolRegistry || userQuery.isEmpty())
+        return QString();
+    QString raw = m_toolRegistry->execute(QStringLiteral("web_search"),
+        QVariantMap{{QStringLiteral("query"), userQuery}});
+    QJsonObject obj = QJsonDocument::fromJson(raw.toUtf8()).object();
+    if (!obj["success"].toBool())
+        return QString();
+    QStringList parts;
+    QString abs = obj["abstract"].toString();
+    if (!abs.isEmpty() && abs != QStringLiteral("(无摘要)"))
+        parts << QStringLiteral("摘要：") + abs;
+    for (const QJsonValue &v : obj["related"].toArray()) {
+        QString s = v.toString().trimmed();
+        if (!s.isEmpty()) parts << s;
+    }
+    return parts.isEmpty() ? QString() : parts.join(QStringLiteral("\n"));
 }
 
 // ── 根据对话内容自动命名会话（调用 LLM 生成标题）───────────────────────────────────

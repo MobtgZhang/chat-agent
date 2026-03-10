@@ -8,13 +8,18 @@
 #include <QNetworkReply>
 #include <QPointer>
 #include <QAbstractItemModel>
+#include <QVector>
+#include <QPair>
 
 #include "messagemodel.h"
+#include "web_search_service.h"
 
 class Settings;
 class History;
 class AgentCore;
+class LLMBackend;
 class MemoryModule;
+class ToolRegistry;
 
 class MainView : public QObject {
     Q_OBJECT
@@ -46,12 +51,13 @@ public:
     // ── 消息编辑 ──────────────────────────────────────────────────────────────
     Q_INVOKABLE void editMessage(int index, const QString &content);
     Q_INVOKABLE void editAndRegenerate(int index, const QString &content);  // 编辑后重新生成
+    Q_INVOKABLE void setUserMessageVersion(int index, int dfsPosition);     // 切换用户消息历史版本 (X/Y)
     Q_INVOKABLE void deleteMessage(int index);
     Q_INVOKABLE void resendFrom(int index);          // 从某条消息重新生成
     Q_INVOKABLE void copyToClipboard(const QString &text);
 
     // ── 会话管理 ──────────────────────────────────────────────────────────────
-    Q_INVOKABLE void newSession(const QString &name = QString());
+    Q_INVOKABLE void newSession(const QString &name = QString(), bool addWelcome = false);
     Q_INVOKABLE void loadSession(const QString &id);
     Q_INVOKABLE void clearMessages();
     Q_INVOKABLE void renameSession(const QString &name);
@@ -80,7 +86,9 @@ private:
     QNetworkAccessManager    *m_nam;
 
     AgentCore    *m_agentCore = nullptr;
+    LLMBackend   *m_llmBackend = nullptr;
     MemoryModule *m_agentMemory = nullptr;
+    ToolRegistry *m_toolRegistry = nullptr;
 
     void   setIsStreaming(bool v);
     void   appendMessage(const QVariantMap &msg);
@@ -90,8 +98,16 @@ private:
 
     void   saveCurrentSession();
     void   loadSessionFile(const QString &id);
-    void   startApiCall(const QVariantList &history);
+    void   startApiCall(const QVariantList &history, const QString &ragContext = QString());
     void   startAgentCall(const QString &userInput);
+    void   startRagFetchAndApiCall(const QString &userQuery);
+    void   onQueryRewriteDone(const QString &userQuery, const QString &rewrittenQuery,
+                             int rewriteDurationMs, const QString &rewriteThinking);
+    void   onRagSearchDone(const QString &userQuery,
+                          const QVector<SearchResult> &results,
+                          int rewriteDurationMs, const QString &rewriteThinking, int searchDurationMs);
+    void   doStartApiCall(const QString &ragContext);
+    QString fetchRagContext(const QString &userQuery) const;
 
     void   autoNameCurrentSession();   // 对话结束后调用 LLM 生成标题
     void   requestSessionTitle();      // 发起标题生成请求（异步）

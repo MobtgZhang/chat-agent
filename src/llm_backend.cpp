@@ -100,6 +100,43 @@ void LLMBackend::abort() {
         m_reply->abort();
         m_reply = nullptr;
     }
+    if (m_completeReply) {
+        m_completeReply->abort();
+        m_completeReply = nullptr;
+    }
+}
+
+void LLMBackend::chatComplete(const QVariantList &messages, const QString &systemPrompt) {
+    if (m_completeReply) {
+        m_completeReply->abort();
+        m_completeReply = nullptr;
+    }
+
+    QJsonObject body;
+    body["model"] = m_model;
+    body["stream"] = false;
+    body["temperature"] = 0.3;
+    body["max_tokens"] = 256;
+    body["thinking"] = QJsonObject{{"type", "enabled"}};
+    body["enable_thinking"] = true;
+
+    QJsonArray msgs;
+    if (!systemPrompt.isEmpty())
+        msgs.append(QJsonObject{{"role", "system"}, {"content", systemPrompt}});
+    for (const QVariant &v : messages) {
+        QVariantMap m = v.toMap();
+        QString role = m["role"].toString();
+        if (role == "ai") role = "assistant";
+        msgs.append(QJsonObject{{"role", role}, {"content", m["content"].toString()}});
+    }
+    body["messages"] = msgs;
+
+    QNetworkRequest req(buildCompletionsUrl());
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    req.setRawHeader("Authorization", ("Bearer " + m_apiKey).toUtf8());
+
+    m_completeReply = m_nam->post(req, QJsonDocument(body).toJson());
+    connect(m_completeReply, &QNetworkReply::finished, this, &LLMBackend::onCompleteFinished);
 }
 
 void LLMBackend::onReadyRead() {
@@ -182,4 +219,31 @@ void LLMBackend::onFinished() {
     }
     m_reply->deleteLater();
     m_reply = nullptr;
+}
+
+void LLMBackend::onCompleteFinished() {
+    if (!m_completeReply) return;
+    QNetworkReply *reply = m_completeReply;
+    m_completeReply = nullptr;
+
+    if (reply->error() != QNetworkReply::NoError
+        && reply->error() != QNetworkReply::OperationCanceledError) {
+        emit errorOccurred(reply->errorString());
+        reply->deleteLater();
+        return;
+    }
+
+    QByteArray data = reply->readAll();
+    reply->deleteLater();
+
+    QJsonObject root = QJsonDocument::fromJson(data).object();
+    QJsonArray choices = root["choices"].toArray();
+    if (choices.isEmpty()) {
+        emit errorOccurred(QStringLiteral("Empty completion response"));
+        return;
+    }
+    QJsonObject msg = choices.first().toObject()["message"].toObject();
+    QString content = msg["content"].toString().trimmed();
+    QString reasoning = msg["reasoning_content"].toString().trimmed();
+    emit completeReceived(content, reasoning);
 }

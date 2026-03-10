@@ -3,86 +3,119 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin>
+  <link rel="stylesheet" href="qrc:/src/qml/md_libs/katex.min.css">
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    html, body { background: transparent !important; overflow: hidden; color: #DBDEE1; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; word-wrap: break-word; }
-    #content { padding: 4px; color: inherit; }
-    /* 代码块：气泡内的气泡样式 */
+    html, body { background: transparent !important; overflow: hidden; color: #E4E6EB; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; line-height: 1.65; word-wrap: break-word; }
+    #content { padding: 6px 2px; color: inherit; font-size: 14px; }
+
+    /* ── Dark 主题：代码块 ── */
     #content .code-bubble-wrapper {
       position: relative;
-      margin: 10px 0;
-      padding: 2px;
-      background: rgba(88, 101, 242, 0.12);
-      border: 1px solid rgba(88, 101, 242, 0.25);
-      border-radius: 10px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      margin: 12px 0;
+      padding: 3px;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.22);
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
     }
     #content .code-bubble-inner {
-      background: #1a1b1e;
-      border-radius: 8px;
-      padding: 12px 44px 12px 12px;
+      background: #1F2937;
+      border-radius: 10px;
+      padding: 14px 48px 14px 14px;
       overflow-x: auto;
-      border: 1px solid #2e3035;
+      border: 1px solid #374151;
     }
-    #content .code-bubble-inner pre {
-      margin: 0;
-      padding: 0;
-      background: transparent;
-    }
+    #content .code-bubble-inner pre { margin: 0; padding: 0; background: transparent; }
     #content .code-copy-btn {
       position: absolute;
-      top: 8px;
-      right: 8px;
-      width: 28px;
-      height: 28px;
+      top: 10px;
+      right: 10px;
+      width: 30px;
+      height: 30px;
       border: none;
-      border-radius: 6px;
-      background: rgba(88, 101, 242, 0.2);
-      color: #B5BAC1;
+      border-radius: 8px;
+      background: rgba(99, 102, 241, 0.25);
+      color: #9CA3AF;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: background 0.15s, color 0.15s;
+      transition: background 0.2s, color 0.2s;
       z-index: 2;
     }
     #content .code-copy-btn:hover {
-      background: rgba(88, 101, 242, 0.4);
-      color: #DBDEE1;
+      background: rgba(99, 102, 241, 0.4);
+      color: #E5E7EB;
     }
-    #content .code-copy-btn.copied {
-      color: #43b581;
-    }
-    #content code { font-family: ui-monospace, monospace; font-size: 0.9em; }
+    #content .code-copy-btn.copied { color: #34D399; }
+
+    #content code { font-family: "SF Mono", "Fira Code", "Consolas", ui-monospace, monospace; font-size: 0.92em; }
     #content pre code { background: transparent; padding: 0; }
-    #content pre { background: #1e1f22; border-radius: 6px; padding: 12px; overflow-x: auto; margin: 8px 0; }
-    #content p { margin: 6px 0; }
-    #content ul, #content ol { margin: 6px 0; padding-left: 24px; }
-    #content blockquote { border-left: 4px solid #5865F2; margin: 8px 0; padding-left: 16px; color: #949BA4; }
-    #content table { border-collapse: collapse; margin: 8px 0; }
-    #content th, #content td { border: 1px solid #3F4147; padding: 6px 10px; }
-    #content a { color: #5865F2; text-decoration: none; }
+    #content pre {
+      background: #1F2937;
+      border-radius: 8px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      margin: 10px 0;
+      border: 1px solid #374151;
+    }
+    #content p { margin: 8px 0; }
+    #content ul, #content ol { margin: 8px 0; padding-left: 26px; }
+    #content blockquote {
+      border-left: 4px solid #6366F1;
+      margin: 10px 0;
+      padding-left: 18px;
+      color: #9CA3AF;
+    }
+
+    /* 表格 */
+    #content .table-wrapper { overflow-x: auto; margin: 12px 0; -webkit-overflow-scrolling: touch; }
+    #content table { border-collapse: collapse; margin: 0; min-width: 200px; width: auto; }
+    #content th, #content td { border: 1px solid #4B5563; padding: 10px 14px; text-align: left; }
+    #content th { background: rgba(99, 102, 241, 0.18); font-weight: 600; color: inherit; }
+    #content tbody tr:nth-child(even) { background: rgba(255,255,255,0.04); }
+
+    #content a { color: #818CF8; text-decoration: none; }
     #content a:hover { text-decoration: underline; }
-    /* KaTeX 数学公式继承文字颜色，避免默认黑色 */
+
+    /* KaTeX */
     #content .katex, #content .katex * { color: inherit !important; }
-    /* Light 主题：代码块、表格、blockquote 等需浅色背景+深色文字 */
-    #content.theme-light .code-bubble-inner { background: #F5F5F7 !important; border-color: #D8D8DC !important; color: #1A1A1C !important; }
-    #content.theme-light .code-bubble-inner pre, #content.theme-light .code-bubble-inner code { color: #1A1A1C !important; background: transparent !important; }
-    #content.theme-light .code-copy-btn { color: #5C5E66 !important; }
-    #content.theme-light .code-copy-btn:hover { color: #1A1A1C !important; }
-    #content.theme-light pre { background: #F5F5F7 !important; border: 1px solid #D8D8DC; color: #1A1A1C !important; }
-    #content.theme-light blockquote { color: #5C5E66 !important; }
-    #content.theme-light th, #content.theme-light td { border-color: #D8D8DC !important; color: inherit; }
+
+    /* ── Light 主题 ── */
+    #content.theme-light .code-bubble-wrapper {
+      background: rgba(79, 70, 229, 0.08);
+      border-color: rgba(79, 70, 229, 0.2);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    #content.theme-light .code-bubble-inner {
+      background: #F8FAFC !important;
+      border-color: #E2E8F0 !important;
+      color: #1E293B !important;
+    }
+    #content.theme-light .code-bubble-inner pre,
+    #content.theme-light .code-bubble-inner code { color: #1E293B !important; background: transparent !important; }
+    #content.theme-light .code-copy-btn { color: #64748B !important; }
+    #content.theme-light .code-copy-btn:hover { color: #1E293B !important; }
+    #content.theme-light pre {
+      background: #F8FAFC !important;
+      border: 1px solid #E2E8F0;
+      color: #1E293B !important;
+    }
+    #content.theme-light blockquote { color: #64748B !important; border-left-color: #4F46E5; }
+    #content.theme-light th, #content.theme-light td { border-color: #E2E8F0 !important; color: inherit; }
+    #content.theme-light th { background: rgba(79, 70, 229, 0.1) !important; }
+    #content.theme-light tbody tr:nth-child(even) { background: rgba(0,0,0,0.02) !important; }
+    #content.theme-light a { color: #4F46E5; }
   </style>
 </head>
 <body>
   <div id="content"></div>
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js" crossorigin></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" crossorigin></script>
+  <script src="qrc:/src/qml/md_libs/marked.min.js"></script>
+  <script src="qrc:/src/qml/md_libs/katex.min.js"></script>
+  <script src="qrc:/src/qml/md_libs/contrib/auto-render.min.js"></script>
   <script>
     // 先把 LaTeX 数学块从 Markdown 文本中摘出来，避免被 marked 误处理
     // （尤其是公式里的下划线、星号等会被当成 Markdown 语法）
@@ -238,6 +271,19 @@
 
       // 为代码块添加气泡样式和复制按钮
       enhanceCodeBlocks(el);
+      // 为表格添加横向滚动包装
+      enhanceTables(el);
+    }
+
+    function enhanceTables(rootEl) {
+      const tables = rootEl.querySelectorAll('table');
+      tables.forEach(tbl => {
+        if (tbl.closest('.table-wrapper')) return;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'table-wrapper';
+        tbl.parentNode.insertBefore(wrapper, tbl);
+        wrapper.appendChild(tbl);
+      });
     }
 
     const copyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';

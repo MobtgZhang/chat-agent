@@ -1,13 +1,11 @@
 #include "websearch_tool.h"
-#include <QNetworkRequest>
-#include <QNetworkReply>
+#include "settings.h"
+#include "web_search_service.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QUrlQuery>
-#include <QEventLoop>
 
-WebSearchTool::WebSearchTool(QObject *parent) : BaseTool(parent) {
+WebSearchTool::WebSearchTool(Settings *settings, QObject *parent) : BaseTool(parent), m_settings(settings) {
     m_nam = new QNetworkAccessManager(this);
 }
 
@@ -21,56 +19,11 @@ QVariantMap WebSearchTool::parametersSchema() const {
         { "properties", QVariantMap{
             { "query", QVariantMap{
                 { "type", "string" },
-                { "description", "搜索关键词" }
+                { "description", "简短的搜索关键词（1-10个词，不要包含对话背景或冗长描述，如：\"Python 安装教程\"）" }
             }}
         }},
         { "required", QVariantList{"query"} }
     };
-}
-
-void WebSearchTool::doSearch(const QString &query) {
-    QUrl url("https://api.duckduckgo.com/");
-    QUrlQuery q;
-    q.addQueryItem("q", query);
-    q.addQueryItem("format", "json");
-    url.setQuery(q);
-
-    QNetworkRequest req(url);
-
-    QEventLoop loop;
-    QNetworkReply *reply = m_nam->get(req);
-    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec();
-
-    QJsonObject result;
-    if (reply->error() == QNetworkReply::NoError) {
-        QByteArray data = reply->readAll();
-        QJsonObject root = QJsonDocument::fromJson(data).object();
-        QString abstract = root["Abstract"].toString();
-        QString abstractUrl = root["AbstractURL"].toString();
-        QJsonArray related = root["RelatedTopics"].toArray();
-
-        result["abstract"] = abstract.isEmpty() ? "(无摘要)" : abstract;
-        result["url"] = abstractUrl;
-        QJsonArray snippets;
-        for (int i = 0; i < qMin(3, related.size()); ++i) {
-            QJsonObject r = related[i].toObject();
-            if (r.contains("Text"))
-                snippets.append(r["Text"].toString());
-        }
-        result["related"] = snippets;
-        result["success"] = true;
-    } else {
-        result["error"] = reply->errorString();
-        result["success"] = false;
-    }
-    reply->deleteLater();
-
-    m_pendingResult = QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
-}
-
-void WebSearchTool::onFinished() {
-    // 用于异步回调（当前实现为同步）
 }
 
 QString WebSearchTool::execute(const QVariantMap &args) {
@@ -81,9 +34,38 @@ QString WebSearchTool::execute(const QVariantMap &args) {
         return r;
     }
 
-    m_pendingQuery = query;
-    doSearch(query);
+    QVector<QPair<QString, QString>> results = WebSearchService::search(query, m_settings, m_nam);
 
+    QJsonObject result;
+    QString engine = m_settings ? m_settings->searchEngine().trimmed().toLower() : QStringLiteral("duckduckgo");
+    if (engine == QLatin1String("duckduckgo")) {
+        result["searchUrl"] = QStringLiteral("https://html.duckduckgo.com/html/?q=%1").arg(QString::fromUtf8(QUrl::toPercentEncoding(query)));
+    } else if (engine == QLatin1String("google")) {
+        result["searchUrl"] = QStringLiteral("https://www.google.com/search?q=%1").arg(QString::fromUtf8(QUrl::toPercentEncoding(query)));
+    } else if (engine == QLatin1String("bing")) {
+        result["searchUrl"] = QStringLiteral("https://www.bing.com/search?q=%1").arg(QString::fromUtf8(QUrl::toPercentEncoding(query)));
+    }
+    result["success"] = true;
+
+    QJsonArray snippets;
+    QStringList summary;
+    for (const auto &p : results) {
+        QJsonObject item;
+        item["title"] = p.first;
+        item["url"] = p.second;
+        snippets.append(item);
+        summary.append(p.first);
+    }
+    result["related"] = snippets;
+    if (results.isEmpty()) {
+        result["abstract"] = result.contains("searchUrl")
+            ? QStringLiteral("未解析到结果，请访问上方 searchUrl 手动搜索。")
+            : QStringLiteral("未获取到搜索结果。");
+    } else {
+        result["abstract"] = summary.join(" | ");
+    }
+
+    m_pendingResult = QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
     emit executionFinished(name(), m_pendingResult);
     return m_pendingResult;
 }

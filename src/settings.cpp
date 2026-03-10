@@ -37,9 +37,33 @@ void Settings::setMaxTokens(int v)              { if (m_maxTokens   != v) { m_ma
 void Settings::setSystemPrompt(const QString &v){ if (m_systemPrompt!= v) { m_systemPrompt= v; emit systemPromptChanged(); } }
 void Settings::setMaxToolRounds(int v)           { int clamped = qBound(5, v, 40); if (m_maxToolRounds != clamped) { m_maxToolRounds = clamped; emit maxToolRoundsChanged(); } }
 void Settings::setShowThinking(bool v)            { if (m_showThinking!= v) { m_showThinking= v; emit showThinkingChanged(); } }
+void Settings::setChatOnline(bool v)              { if (m_chatOnline!= v) { m_chatOnline= v; emit chatOnlineChanged(); save(); } }
 void Settings::setTheme(const QString &v)         { QString t = (v == QStringLiteral("light")) ? QStringLiteral("light") : QStringLiteral("dark"); if (m_theme != t) { m_theme = t; emit themeChanged(); } }
 void Settings::setLanguage(const QString &v)      { if (m_language != v && !v.isEmpty()) { m_language = v; emit languageChanged(); } }
 void Settings::setCacheDirectory(const QString &v){ if (m_cacheDirectory != v) { m_cacheDirectory = v; emit cacheDirectoryChanged(); } }
+void Settings::setSearchEngine(const QString &v) {
+    QString e = v.trimmed().toLower();
+    if (e != QStringLiteral("duckduckgo") && e != QStringLiteral("bing") && e != QStringLiteral("brave")
+        && e != QStringLiteral("google") && e != QStringLiteral("tencent"))
+        e = QStringLiteral("duckduckgo");
+    if (m_searchEngine != e) { m_searchEngine = e; emit searchEngineChanged(); }
+}
+void Settings::setWebSearchApiKey(const QString &v) {
+    if (m_webSearchApiKey != v.trimmed()) { m_webSearchApiKey = v.trimmed(); emit webSearchApiKeyChanged(); }
+}
+void Settings::setTencentSecretId(const QString &v) {
+    if (m_tencentSecretId != v.trimmed()) { m_tencentSecretId = v.trimmed(); emit tencentSecretIdChanged(); }
+}
+void Settings::setTencentSecretKey(const QString &v) {
+    if (m_tencentSecretKey != v.trimmed()) { m_tencentSecretKey = v.trimmed(); emit tencentSecretKeyChanged(); }
+}
+void Settings::setProxyMode(const QString &v) {
+    QString mode = v.trimmed().toLower();
+    if (mode != QStringLiteral("off") && mode != QStringLiteral("system") && mode != QStringLiteral("manual"))
+        mode = QStringLiteral("off");
+    if (m_proxyMode != mode) { m_proxyMode = mode; emit proxyModeChanged(); }
+}
+void Settings::setProxyUrl(const QString &v){ if (m_proxyUrl != v.trimmed()) { m_proxyUrl = v.trimmed(); emit proxyUrlChanged(); } }
 
 QString Settings::urlToLocalPath(const QString &url) const {
     return QUrl(url).toLocalFile();
@@ -216,9 +240,16 @@ void Settings::save() {
     root["systemPrompt"]  = m_systemPrompt;
     root["maxToolRounds"]  = m_maxToolRounds;
     root["showThinking"]   = m_showThinking;
+    root["chatOnline"]     = m_chatOnline;
     root["theme"]          = m_theme;
     root["language"]       = m_language;
     root["cacheDirectory"] = m_cacheDirectory;
+    root["searchEngine"]   = m_searchEngine;
+    root["webSearchApiKey"] = m_webSearchApiKey;
+    root["tencentSecretId"] = m_tencentSecretId;
+    root["tencentSecretKey"] = m_tencentSecretKey;
+    root["proxyMode"]      = m_proxyMode;
+    root["proxyUrl"]       = m_proxyUrl;
 
     QJsonArray models;
     for (const QString &m : m_modelList) models.append(m);
@@ -258,6 +289,7 @@ void Settings::load() {
     if (root.contains("systemPrompt"))  m_systemPrompt  = root["systemPrompt"].toString();
     if (root.contains("maxToolRounds"))  m_maxToolRounds = qBound(5, root["maxToolRounds"].toInt(40), 40);
     if (root.contains("showThinking"))   m_showThinking  = root["showThinking"].toBool(false);
+    if (root.contains("chatOnline"))     m_chatOnline    = root["chatOnline"].toBool(false);
     if (root.contains("theme")) {
         QString t = root["theme"].toString();
         m_theme = (t == QStringLiteral("light")) ? t : QStringLiteral("dark");
@@ -267,6 +299,26 @@ void Settings::load() {
         m_language = lang.isEmpty() ? QStringLiteral("en") : lang;
     }
     if (root.contains("cacheDirectory")) m_cacheDirectory = root["cacheDirectory"].toString();
+    if (root.contains("searchEngine")) {
+        QString e = root["searchEngine"].toString().trimmed().toLower();
+        if (e == QStringLiteral("duckduckgo") || e == QStringLiteral("bing") || e == QStringLiteral("brave")
+            || e == QStringLiteral("google") || e == QStringLiteral("tencent"))
+            m_searchEngine = e;
+    }
+    if (root.contains("webSearchApiKey")) m_webSearchApiKey = root["webSearchApiKey"].toString().trimmed();
+    if (root.contains("tencentSecretId")) m_tencentSecretId = root["tencentSecretId"].toString().trimmed();
+    if (root.contains("tencentSecretKey")) m_tencentSecretKey = root["tencentSecretKey"].toString().trimmed();
+    if (root.contains("proxyMode")) {
+        QString mode = root["proxyMode"].toString().trimmed().toLower();
+        if (mode == QStringLiteral("system") || mode == QStringLiteral("manual"))
+            m_proxyMode = mode;
+        else
+            m_proxyMode = QStringLiteral("off");
+    } else if (root.contains("proxyUrl")) {
+        // 兼容旧配置：有 proxyUrl 则为 manual，否则为 off
+        m_proxyMode = root["proxyUrl"].toString().trimmed().isEmpty() ? QStringLiteral("off") : QStringLiteral("manual");
+    }
+    if (root.contains("proxyUrl")) m_proxyUrl = root["proxyUrl"].toString().trimmed();
 
     if (root.contains("modelList")) {
         m_modelList.clear();

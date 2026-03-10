@@ -42,7 +42,7 @@ public:
 
 signals:
     void chunkReceived(const QString &content, const QString &reasoning, bool isThinking);
-    void toolExecuted(const QString &toolName, const QString &result);
+    void toolExecuted(const QString &toolName, const QVariantMap &args, const QString &result);
     void finished();
     void errorOccurred(const QString &msg);
     void modeChanged();
@@ -56,7 +56,7 @@ private slots:
 
 private:
     QString buildSystemPrompt() const;
-    void continueReAct(const QVariantList &messages);
+    void doExecuteToolAndContinue(const QString &toolName, const QVariantMap &args, const QString &effectiveQuery);
 
     LLMBackend    *m_llm = nullptr;
     ToolRegistry  *m_registry = nullptr;
@@ -67,6 +67,7 @@ private:
     QVariantList m_pendingMessages;
     int m_maxToolRounds = 40;
     int m_currentToolRound = 0;
+    QString m_currentUserInput;  // 当前用户输入，web_search 只用此 query 搜索
 };
 
 #endif // AGENT_CORE_H

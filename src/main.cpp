@@ -61,6 +61,8 @@ int main(int argc, char *argv[]) {
     );
     engine.load(url);
 
+    // 关闭最后一个窗口时退出进程，避免关闭界面后后台仍驻留
+    QObject::connect(&app, &QGuiApplication::lastWindowClosed, &app, &QCoreApplication::quit);
+
     return app.exec();
 }
-

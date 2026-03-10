@@ -2,6 +2,7 @@
 #include "llm_backend.h"
 #include "tool_registry.h"
 #include "memory_module.h"
+#include "web_search_service.h"
 
 AgentCore::AgentCore(QObject *parent) : QObject(parent) {}
 
@@ -61,6 +62,7 @@ QString AgentCore::buildSystemPrompt() const {
 void AgentCore::run(const QVariantList &messages, const QString &userInput) {
     m_currentToolRound = 0;
     m_pendingMessages = messages;
+    m_currentUserInput = userInput.trimmed();
 
     // 添加用户消息
     QVariantMap userMsg;
@@ -102,10 +104,55 @@ void AgentCore::onLLMFinished(const QString &fullContent) {
 void AgentCore::onToolRequested(const QString &toolName, const QVariantMap &args) {
     if (!m_registry) return;
 
-    QString result = m_registry->execute(toolName, args);
-    emit toolExecuted(toolName, result);
+    // web_search：参考 MindSearch，History + Query Rewrite（LLM）→ 搜索
+    if (toolName == QLatin1String("web_search") && !m_currentUserInput.isEmpty()) {
+        QString ctx = WebSearchService::buildConversationContextFromMessages(m_pendingMessages, true);
+        if (!ctx.isEmpty() && m_llm) {
+            const QString sysPrompt = QStringLiteral(
+                "你是一个搜索查询改写助手。根据「主问题」「历史对话」和「当前问题」，输出适合搜索引擎的查询。\n"
+                "要求：1) 解决指代；2) 保持简洁；3) 多个子查询用分号分隔；4) 只输出查询内容，不要其他文字。");
+            QVariantMap userMsg;
+            userMsg["role"] = QStringLiteral("user");
+            userMsg["content"] = ctx + QStringLiteral("\n\n当前问题：") + m_currentUserInput;
+            QVariantList msgs;
+            msgs.append(userMsg);
+            connect(m_llm, &LLMBackend::completeReceived, this,
+                [this, toolName, args](const QString &rewritten, const QString &) {
+                    disconnect(m_llm, &LLMBackend::completeReceived, this, nullptr);
+                    disconnect(m_llm, &LLMBackend::errorOccurred, this, nullptr);
+                    QString q = rewritten.trimmed();
+                    if (q.length() > 500) q = q.left(500).trimmed();
+                    doExecuteToolAndContinue(toolName, args, q.isEmpty() ? m_currentUserInput : q);
+                }, Qt::SingleShotConnection);
+            connect(m_llm, &LLMBackend::errorOccurred, this,
+                [this, toolName, args, ctx](const QString &) {
+                    disconnect(m_llm, &LLMBackend::completeReceived, this, nullptr);
+                    disconnect(m_llm, &LLMBackend::errorOccurred, this, nullptr);
+                    QString fallback = WebSearchService::buildContextualSearchQuery(ctx, m_currentUserInput);
+                    doExecuteToolAndContinue(toolName, args, fallback.isEmpty() ? m_currentUserInput : fallback);
+                }, Qt::SingleShotConnection);
+            m_llm->chatComplete(msgs, sysPrompt);
+            return;
+        }
+    }
 
-    // 将 assistant 消息（含 tool_calls）和 tool 结果加入历史，继续 ReAct
+    // 非 web_search 或无需改写：直接执行
+    QVariantMap actualArgs = args;
+    if (toolName == QLatin1String("web_search") && !m_currentUserInput.isEmpty()) {
+        QString ctx = WebSearchService::buildConversationContextFromMessages(m_pendingMessages, true);
+        actualArgs["query"] = WebSearchService::buildContextualSearchQuery(ctx, m_currentUserInput);
+    }
+    doExecuteToolAndContinue(toolName, args, actualArgs["query"].toString());
+}
+
+void AgentCore::doExecuteToolAndContinue(const QString &toolName, const QVariantMap &args, const QString &effectiveQuery) {
+    QVariantMap actualArgs = args;
+    if (toolName == QLatin1String("web_search"))
+        actualArgs["query"] = effectiveQuery;
+
+    QString result = m_registry->execute(toolName, actualArgs);
+    emit toolExecuted(toolName, args, result);
+
     m_currentToolRound++;
     if (m_currentToolRound > m_maxToolRounds) {
         emit errorOccurred("工具调用轮次超限");
@@ -113,9 +160,6 @@ void AgentCore::onToolRequested(const QString &toolName, const QVariantMap &args
         return;
     }
 
-    // 需要将本轮 assistant 的完整回复 + tool 结果追加到 m_pendingMessages
-    // 由于流式 API 的 tool_calls 可能是增量送达，这里简化处理：
-    // 将 tool 结果作为 user 消息发送，让 LLM 继续
     QVariantMap toolMsg;
     toolMsg["role"] = "user";
     toolMsg["content"] = QString("[Tool %1 结果]\n%2").arg(toolName, result);

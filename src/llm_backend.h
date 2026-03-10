@@ -32,18 +32,24 @@ public:
     Q_INVOKABLE void chatStream(const QVariantList &messages,
                                 const QString &systemPrompt = QString());
 
+    // 非流式单次补全（用于 Query Rewrite 等）：仅返回全文，无 tools
+    Q_INVOKABLE void chatComplete(const QVariantList &messages,
+                                  const QString &systemPrompt = QString());
+
     // 停止当前请求
     Q_INVOKABLE void abort();
 
 signals:
     void chunkReceived(const QString &contentChunk, const QString &reasoningChunk, bool isThinking);
     void finished(const QString &fullContent);
+    void completeReceived(const QString &fullContent, const QString &reasoningContent = QString());  // chatComplete 成功时发射
     void toolCallRequested(const QString &toolName, const QVariantMap &args);
     void errorOccurred(const QString &msg);
 
 private slots:
     void onReadyRead();
     void onFinished();
+    void onCompleteFinished();
 
 private:
     void parseStreamLine(const QByteArray &line);
@@ -58,6 +64,7 @@ private:
 
     QNetworkAccessManager *m_nam;
     QPointer<QNetworkReply> m_reply;
+    QPointer<QNetworkReply> m_completeReply;  // chatComplete 专用，与 m_reply 互斥
 
     // 流式 tool_calls 累积：index -> (name, arguments)
     QMap<int, std::pair<QString, QString>> m_pendingToolCalls;

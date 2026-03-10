@@ -10,23 +10,23 @@ ApplicationWindow {
     minimumWidth: 800; minimumHeight: 560
     visible: true
     title: "ChatAgent — " + mainView.sessionName
-    color: (typeof settings !== "undefined" && settings.theme === "light") ? "#FAFAFA" : "#0D0D0F"
-    // ── 动态色板：Dark 黑底白字 / Light 白底黑字，高对比度 ──────────────────────
+    color: (typeof settings !== "undefined" && settings.theme === "light") ? "#F8FAFC" : "#0F172A"
+    // ── 动态色板：Dark / Light 模式，舒适现代配色 ────────────────────────────────
     readonly property bool isLight:     (typeof settings !== "undefined" && settings.theme === "light")
-    readonly property color cBg:        isLight ? "#FAFAFA" : "#0D0D0F"
-    readonly property color cSidebar:   isLight ? "#F0F0F2" : "#111113"
-    readonly property color cInput:     isLight ? "#FFFFFF" : "#1C1C1F"
-    readonly property color cBorder:    isLight ? "#D8D8DC" : "#2D2D32"
-    readonly property color cHighlight: isLight ? "#E8E8EC" : "#252528"
-    readonly property color cText:      isLight ? "#0D0D0F" : "#F2F2F4"
-    readonly property color cMuted:     isLight ? "#3D3F47" : "#8E9099"
-    readonly property color cAccent:    "#5865F2"
-    readonly property color cDivider:   isLight ? "#E0E0E4" : "#2E3035"
-    readonly property color cSelectedBg: isLight ? "#E0E4F8" : "#3D4270"
-    readonly property color cScrollBar: isLight ? "#C0C2C8" : "#484B52"
-    readonly property color cScrollBarHover: isLight ? "#A0A2A8" : "#60636A"
-    // 弹窗/菜单背景：Light 模式下用纯白以提升对比度
-    readonly property color cPopupBg: isLight ? "#FFFFFF" : "#111113"
+    readonly property color cBg:        isLight ? "#F8FAFC" : "#0F172A"
+    readonly property color cChatBg:    isLight ? "#FFFFFF" : "#0F172A"
+    readonly property color cSidebar:   isLight ? "#F1F5F9" : "#1E293B"
+    readonly property color cInput:     isLight ? "#FFFFFF" : "#1E293B"
+    readonly property color cBorder:    isLight ? "#E2E8F0" : "#334155"
+    readonly property color cHighlight: isLight ? "#E2E8F0" : "#334155"
+    readonly property color cText:      isLight ? "#1E293B" : "#E2E8F0"
+    readonly property color cMuted:     isLight ? "#64748B" : "#94A3B8"
+    readonly property color cAccent:     isLight ? "#4F46E5" : "#6366F1"
+    readonly property color cDivider:   isLight ? "#E2E8F0" : "#334155"
+    readonly property color cSelectedBg: isLight ? "#EEF2FF" : "#312E81"
+    readonly property color cScrollBar: isLight ? "#CBD5E1" : "#475569"
+    readonly property color cScrollBarHover: isLight ? "#94A3B8" : "#64748B"
+    readonly property color cPopupBg: isLight ? "#FFFFFF" : "#1E293B"
 
     // ── 弹窗（懒创建）────────────────────────────────────────────────────────
     property var settingsWin: null
@@ -754,6 +754,12 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
+            // 聊天区域背景（与侧边栏区分的柔和底色）
+            Rectangle {
+                anchors { top: parent.top; bottom: parent.bottom; left: parent.left; right: parent.right }
+                color: cChatBg
+            }
+
             // ── 顶部 Header ───────────────────────────────────────────────────
             Rectangle {
                 id: chatHeader
@@ -876,7 +882,7 @@ ApplicationWindow {
                     }
                 }
 
-                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: cBorder }
+                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: cDivider }
             }
 
             // ── 输入区 ────────────────────────────────────────────────────────
@@ -888,8 +894,10 @@ ApplicationWindow {
 
                 Rectangle {
                     anchors { fill: parent; margins: 16; topMargin: 10 }
-                    color: cInput; radius: 8
-                    border.color: inputArea.activeFocus ? "#5865F2" : cBorder
+                    color: cInput
+                    radius: 12
+                    border.width: 1
+                    border.color: inputArea.activeFocus ? cAccent : cBorder
 
                     ColumnLayout {
                         anchors { fill: parent; margins: 10 }
@@ -929,7 +937,7 @@ ApplicationWindow {
                                 spacing: 4
 
                                 readonly property var modes: ["chat", "agent", "planning"]
-                                readonly property var labels: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0 && localeBridge.t.modeChat) ? [localeBridge.t.modeChat, localeBridge.t.modeAgent, localeBridge.t.modePlanning] : ["Chat", "Agent", "Planning"]
+                                readonly property var labels: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0 && localeBridge.t.modeChat) ? [localeBridge.t.modeChat, localeBridge.t.modeAgent, localeBridge.t.modeResearch] : ["对话", "智能体", "研究"]
                                 readonly property var iconNorm: ["qrc:/src/icons/icon_chat.svg", "qrc:/src/icons/icon_agent.svg", "qrc:/src/icons/icon_planning.svg"]
                                 readonly property var iconActive: ["qrc:/src/icons/icon_chat_active.svg", "qrc:/src/icons/icon_agent_active.svg", "qrc:/src/icons/icon_planning_active.svg"]
 
@@ -995,6 +1003,52 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                            }
+
+                            // 对话模式下的联网切换按钮（一个按钮实现联网/不联网两种状态）
+                            Rectangle {
+                                id: onlineToggleBtn
+                                visible: mainView.chatMode === "chat"
+                                height: 32
+                                width: onlineToggleRow.implicitWidth + 16
+                                radius: 8
+                                property bool hovered: onlineToggleHover.hovered
+                                property bool isOnline: typeof settings !== "undefined" && settings.chatOnline
+                                color: {
+                                    if (isOnline) return cAccent
+                                    if (hovered) return cHighlight
+                                    return cInput
+                                }
+                                border.color: isOnline ? cAccent : (hovered ? cBorder : "transparent")
+                                border.width: isOnline ? 0 : 1
+                                Row {
+                                    id: onlineToggleRow
+                                    anchors.centerIn: parent
+                                    spacing: 6
+                                    Text { text: "🌐"; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
+                                    Text {
+                                        text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0)
+                                            ? (onlineToggleBtn.isOnline ? localeBridge.t.chatOnline : localeBridge.t.chatOffline)
+                                            : (onlineToggleBtn.isOnline ? "联网" : "不联网")
+                                        color: onlineToggleBtn.isOnline ? "white" : cText
+                                        font.pixelSize: 12
+                                        font.weight: onlineToggleBtn.isOnline ? Font.DemiBold : Font.Normal
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+                                HoverHandler { id: onlineToggleHover }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (typeof settings !== "undefined")
+                                            settings.chatOnline = !settings.chatOnline
+                                    }
+                                }
+                                ToolTip.text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0)
+                                    ? localeBridge.t.chatOnlineTip : "点击切换：联网时使用 RAG 检索回答"
+                                ToolTip.visible: onlineToggleBtn.hovered
+                                ToolTip.delay: 600
                             }
 
                             // 字数提示
@@ -1093,8 +1147,9 @@ ApplicationWindow {
                     right:  parent.right
                 }
                 clip: true
-                spacing: 8
-                topMargin: 16; bottomMargin: 8
+                spacing: 12
+                topMargin: 20; bottomMargin: 16
+                leftMargin: 20; rightMargin: 20
                 cacheBuffer: 3000
                 reuseItems: true
 
@@ -1117,10 +1172,23 @@ ApplicationWindow {
                 delegate: ChatMessage {
                     width: chatListView.width
                     role: (model && model.role) ? model.role : "user"
-                    msgContent: (model && model.content) ? model.content : ""
+                    // 依赖 editVersion 强制在切换历史版本时重新求值，确保 model.content 更新能传到气泡
+                    msgContent: {
+                        if (!model) return ""
+                        var _ = model.editVersion
+                        return (model.content !== undefined && model.content !== null) ? model.content : ""
+                    }
                     thinkingContent: (model && model.thinking) ? model.thinking : ""
                     isThinking: (model && model.isThinking) ? true : false
+                    blocks: (model && model.blocks) ? model.blocks : []
+                    ragSearchStatus: (model && model.ragSearchStatus) ? model.ragSearchStatus : ""
+                    ragLinks: (model && model.ragLinks) ? model.ragLinks : []
+                    rewriteDurationMs: (model && model.rewriteDurationMs !== undefined) ? model.rewriteDurationMs : 0
+                    rewriteThinking: (model && model.rewriteThinking) ? model.rewriteThinking : ""
+                    searchDurationMs: (model && model.searchDurationMs !== undefined) ? model.searchDurationMs : 0
                     messageIndex:     index
+                    currentVersion:   (model && model.editVersion !== undefined) ? model.editVersion : 1
+                    totalVersions:   (model && model.editTotal !== undefined) ? model.editTotal : 1
                 }
 
                 onCountChanged: Qt.callLater(function() {

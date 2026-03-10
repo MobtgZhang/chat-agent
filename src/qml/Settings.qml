@@ -464,6 +464,155 @@ Window {
                         }
                     }
 
+                    // 搜索引擎选择（联网搜索用）
+                    SectionBox {
+                        label: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.searchEngineSettings : "Search Engine"
+                        hint:  (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.searchEngineHint : ""
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                        ComboBox {
+                            id: searchEngineCombo
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 36
+                            readonly property var engineList: ["duckduckgo", "bing", "brave", "google", "tencent"]
+                            readonly property var engineNames: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0)
+                                ? [localeBridge.t.searchEngineDuckDuckGo, localeBridge.t.searchEngineBing, localeBridge.t.searchEngineBrave, localeBridge.t.searchEngineGoogle, localeBridge.t.searchEngineTencent]
+                                : ["DuckDuckGo", "Bing Search", "Brave Search", "Google", "Tencent Search"]
+                            model: engineList
+                            currentIndex: {
+                                var idx = engineList.indexOf(settings.searchEngine)
+                                return idx >= 0 ? idx : 0
+                            }
+                            onActivated: settings.searchEngine = engineList[currentIndex]
+                            contentItem: Text {
+                                leftPadding: 10
+                                text: (searchEngineCombo.currentIndex >= 0 && searchEngineCombo.currentIndex < searchEngineCombo.engineNames.length)
+                                      ? searchEngineCombo.engineNames[searchEngineCombo.currentIndex] : ""
+                                color: cText; font.pixelSize: 13
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle { radius: 5; color: cInput; border.color: cBorder }
+                            popup.background: Rectangle { color: cPopupBg; radius: 5; border.color: cBorder }
+                            delegate: ItemDelegate {
+                                width: parent ? parent.width - 20 : 200
+                                hoverEnabled: true
+                                property string engineName: (searchEngineCombo.engineNames && index >= 0 && index < searchEngineCombo.engineNames.length) ? searchEngineCombo.engineNames[index] : modelData
+                                contentItem: Text {
+                                    text: parent.engineName
+                                    color: cText
+                                    font.pixelSize: 13
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    color: (parent.highlighted || parent.hovered) ? cHighlight : "transparent"
+                                    radius: 4
+                                }
+                            }
+                        }
+                        // Bing/Brave/Google API Key（选 bing=1, brave=2, google=3 时显示）
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            visible: searchEngineCombo.currentIndex >= 1 && searchEngineCombo.currentIndex <= 3
+                            FieldInput {
+                                id: webSearchApiKeyField
+                                Layout.fillWidth: true
+                                text: settings.webSearchApiKey
+                                echoMode: TextInput.Password
+                                placeholderText: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.webSearchApiKeyHint : "Bing/Brave/Google API Key"
+                                onEditingFinished: settings.webSearchApiKey = text
+                            }
+                            Button {
+                                height: 36
+                                text: webSearchApiKeyField.echoMode === TextInput.Password ? ("👁 " + (localeBridge && localeBridge.t && localeBridge.tVersion >= 0 ? localeBridge.t.show : "Show")) : ("🔒 " + (localeBridge && localeBridge.t && localeBridge.tVersion >= 0 ? localeBridge.t.hide : "Hide"))
+                                contentItem: Text { text: parent.text; color: cMuted; font.pixelSize: 12; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { radius: 5; color: cInput; border.color: cBorder }
+                                onClicked: webSearchApiKeyField.echoMode = (webSearchApiKeyField.echoMode === TextInput.Password) ? TextInput.Normal : TextInput.Password
+                            }
+                        }
+                        // 腾讯 SecretId + SecretKey（选 tencent=4 时显示）
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            visible: searchEngineCombo.currentIndex === 4
+                            FieldInput {
+                                id: tencentSecretIdField
+                                Layout.fillWidth: true
+                                text: settings.tencentSecretId
+                                placeholderText: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.tencentSecretIdHint : "SecretId"
+                                onEditingFinished: settings.tencentSecretId = text
+                            }
+                            FieldInput {
+                                id: tencentSecretKeyField
+                                Layout.fillWidth: true
+                                text: settings.tencentSecretKey
+                                echoMode: TextInput.Password
+                                placeholderText: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.tencentSecretKeyHint : "SecretKey"
+                                onEditingFinished: settings.tencentSecretKey = text
+                            }
+                        }
+                        }
+                    }
+
+                    // 代理设置
+                    SectionBox {
+                        label: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.proxySettings : "Proxy"
+                        hint:  (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.proxyHint : ""
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            ComboBox {
+                                id: proxyModeCombo
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 36
+                                readonly property var proxyModeList: ["off", "system", "manual"]
+                                readonly property var proxyModeNames: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0)
+                                    ? [localeBridge.t.proxyModeOff, localeBridge.t.proxyModeSystem, localeBridge.t.proxyModeManual]
+                                    : ["Off", "System", "Manual"]
+                                model: proxyModeList
+                                currentIndex: {
+                                    var idx = proxyModeList.indexOf(settings.proxyMode)
+                                    return idx >= 0 ? idx : 0
+                                }
+                                onActivated: settings.proxyMode = proxyModeList[currentIndex]
+                                contentItem: Text {
+                                    leftPadding: 10
+                                    text: (proxyModeCombo.currentIndex >= 0 && proxyModeCombo.currentIndex < proxyModeCombo.proxyModeNames.length)
+                                          ? proxyModeCombo.proxyModeNames[proxyModeCombo.currentIndex] : ""
+                                    color: cText; font.pixelSize: 13
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle { radius: 5; color: cInput; border.color: cBorder }
+                                popup.background: Rectangle { color: cPopupBg; radius: 5; border.color: cBorder }
+                                delegate: ItemDelegate {
+                                    width: parent ? parent.width - 20 : 200
+                                    hoverEnabled: true
+                                    property string modeName: (proxyModeCombo.proxyModeNames && index >= 0 && index < proxyModeCombo.proxyModeNames.length) ? proxyModeCombo.proxyModeNames[index] : modelData
+                                    contentItem: Text {
+                                        text: parent.modeName
+                                        color: cText
+                                        font.pixelSize: 13
+                                        elide: Text.ElideRight
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        color: (parent.highlighted || parent.hovered) ? cHighlight : "transparent"
+                                        radius: 4
+                                    }
+                                }
+                            }
+                            FieldInput {
+                                Layout.fillWidth: true
+                                visible: settings.proxyMode === "manual"
+                                text: settings.proxyUrl
+                                placeholderText: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.proxyPlaceholder : ""
+                                onEditingFinished: settings.proxyUrl = text
+                            }
+                        }
+                    }
+
                     // 缓存目录设置（历史记录与会话配置存储位置）
                     SectionBox {
                         label: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.cacheDirSettings : "Cache Directory"
@@ -544,6 +693,12 @@ Window {
                         else { settings.language = "en"; settings.save() }
                         settings.theme         = "dark"
                         settings.cacheDirectory = ""
+                        settings.searchEngine  = "duckduckgo"
+                        settings.webSearchApiKey = ""
+                        settings.tencentSecretId = ""
+                        settings.tencentSecretKey = ""
+                        settings.proxyMode     = "off"
+                        settings.proxyUrl      = ""
                         settings.save()
                     }
                 }

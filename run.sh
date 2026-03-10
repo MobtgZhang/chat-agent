@@ -50,6 +50,9 @@ echo "========================================"
 export LD_LIBRARY_PATH="${QT_INSTALL_DIR}/lib:${LD_LIBRARY_PATH}"
 export QML2_IMPORT_PATH="${QT_INSTALL_DIR}/qml:${QML2_IMPORT_PATH}"
 
+# 屏蔽 Qt 字体 OpenType 警告（Monaco 在 Linux 上缺少部分脚本支持，仅为提示，不影响功能）
+export QT_LOGGING_RULES="qt.text.font.db=false"
+
 # 输入法：需让 Qt 找到系统安装的 fcitx5 插件。注意：自定义 Qt 的 plugins 必须放最前，
 # 否则会错误加载系统 Qt 的 sqldrivers/ssl 等，导致 QSQLITE/TLS 失败和 Segmentation fault
 _im_plugin_paths=""

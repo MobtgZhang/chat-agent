@@ -7,29 +7,42 @@ Item {
     id: root
     width: ListView.view ? ListView.view.width : 700
     // 高度根据内容列自适应，保证 Markdown / 数学公式完全显示
-    height: bubbleColumn.implicitHeight + 28
+    height: bubbleColumn.implicitHeight + 32
     property string role:           "user"
     property string msgContent:      ""
 
-    // 主题色（Dark 黑底白字 / Light 白底黑字）
+    // 主题色（Dark / Light）— 更舒适的现代配色
     readonly property bool isLight:  (typeof settings !== "undefined" && settings.theme === "light")
-    readonly property color cTextAi:    isLight ? "#0D0D0F" : "#F2F2F4"
-    readonly property color cTextUser:   "white"
-    readonly property color cMuted:     isLight ? "#5C5E66" : "#8E9099"
-    readonly property color cBubbleAi:   isLight ? "#E8E8EC" : "#404249"
-    readonly property color cBubbleUser: "#5865F2"
-    readonly property color cThinkBg:    isLight ? "#F5F5F7" : "#1A1B1E"
-    readonly property color cThinkBorder: isLight ? "#D8D8DC" : "#2E3035"
-    readonly property color cEditBg:     isLight ? "#FFFFFF" : "#2E3035"
-    readonly property color cEditText:   isLight ? "#0D0D0F" : "#F2F2F4"
-    readonly property color cActionHover: isLight ? "#B0B2B8" : "#5C5F66"
-    readonly property color cActionText: isLight ? "#4A4C54" : "#B5BAC1"
-    readonly property color cBtnCancel:   isLight ? "#E8E8EC" : "#3F4147"
-    readonly property color cMenuBg:     isLight ? "#FAFAFA" : "#0D0D0F"
-    readonly property color cMenuBorder: isLight ? "#D8D8DC" : "#2D2D32"
+    readonly property color cTextAi:    isLight ? "#1A1B1E" : "#E4E6EB"
+    readonly property color cTextUser:   "#FFFFFF"
+    readonly property color cMuted:     isLight ? "#6B7280" : "#9CA3AF"
+    readonly property color cBubbleAi:   isLight ? "#F3F4F6" : "#374151"
+    readonly property color cBubbleAiBorder:   isLight ? "#E5E7EB" : "#4B5563"
+    readonly property color cBubbleUser: isLight ? "#4F46E5" : "#6366F1"
+    readonly property color cBubbleUserBorder: isLight ? "#4338CA" : "#818CF8"
+    readonly property color cThinkBg:    isLight ? "#F8FAFC" : "#1F2937"
+    readonly property color cThinkBorder: isLight ? "#E2E8F0" : "#374151"
+    readonly property color cEditBg:     isLight ? "#FFFFFF" : "#374151"
+    readonly property color cEditText:   isLight ? "#1A1B1E" : "#E4E6EB"
+    readonly property color cActionHover: isLight ? "#E5E7EB" : "#4B5563"
+    readonly property color cActionText: isLight ? "#6B7280" : "#9CA3AF"
+    readonly property color cBtnCancel:   isLight ? "#F3F4F6" : "#4B5563"
+    readonly property color cMenuBg:     isLight ? "#FFFFFF" : "#111827"
+    readonly property color cMenuBorder: isLight ? "#E5E7EB" : "#374151"
+    readonly property color cAvatarAi:    isLight ? "#F59E0B" : "#FBBF24"
+    readonly property color cAvatarUser: isLight ? "#4F46E5" : "#6366F1"
     property string thinkingContent:""
     property bool   isThinking:     false
+    property string ragSearchStatus: ""   // "" | "rewriting" | "searching" | "done"
+    property var    ragLinks:      []     // [{text, url, snippet, index}] 可点击打开
+    property int    rewriteDurationMs: 0  // 查询重写耗时
+    property string rewriteThinking: ""   // 重写思考过程
+    property int    searchDurationMs: 0   // 搜索耗时
+    property real   ragElapsedTime: 0.0   // 重写/搜索进行中时的实时计时
+    property var    blocks:        []
     property int    messageIndex:   -1
+
+    readonly property bool useBlocks: isAI && blocks && blocks.length > 0
 
     // 版本导航（预留扩展：当前为 1/1，后续可接入多版本）
     property int    currentVersion: 1
@@ -45,6 +58,11 @@ Item {
         if (!s || typeof s !== "string") return false
         return /```[\s\S]*?```/.test(s)
     }
+    function hasTable(s) {
+        if (!s || typeof s !== "string") return false
+        // GFM 表格分隔行：| --- | 或 |:---|:---:|---:|
+        return /\|[-\s:]+\|/.test(s)
+    }
 
     Component {
         id: mdRenderComp
@@ -57,7 +75,18 @@ Item {
 
     property bool editing:        false
     property bool thinkExpanded:  false
+    property bool rewriteThinkExpanded: false  // 重写气泡默认折叠
 
+    Timer {
+        id: ragTimer
+        interval: 100
+        running: isAI && (ragSearchStatus === "rewriting" || ragSearchStatus === "searching")
+        repeat: true
+        onTriggered: root.ragElapsedTime += 0.1
+    }
+    onRagSearchStatusChanged: {
+        if (ragSearchStatus === "done" || ragSearchStatus === "") root.ragElapsedTime = 0
+    }
     onIsThinkingChanged: {
         if (isThinking && settings.showThinking && isAI) {
             thinkExpanded = true
@@ -88,31 +117,208 @@ Item {
     Row {
         id: outerRow
         anchors.top: parent.top
-        anchors.topMargin: 12
-        width: parent.width - 40
-        spacing: 12
+        anchors.topMargin: 14
+        width: parent.width - 48
+        spacing: 14
         layoutDirection: isAI ? Qt.LeftToRight : Qt.RightToLeft
 
-        // 头像
+        // 头像 — 圆角+边框，主题色
         Rectangle {
-            width: 28; height: 28; radius: 6
-            color: isAI ? "#F9A825" : "#5865F2"
+            width: 36; height: 36; radius: 10
+            color: isAI ? root.cAvatarAi : root.cAvatarUser
+            border.width: 1
+            border.color: Qt.rgba(1,1,1, isLight ? 0.35 : 0.15)
             Text {
                 anchors.centerIn: parent
                 text: isAI ? "🤖" : "Me"
                 color: "white"
                 font.bold: true
-                font.pixelSize: 11
+                font.pixelSize: 13
             }
         }
 
         // 气泡 + 内容
         Column {
             id: bubbleColumn
-            width: Math.min(outerRow.width - 28 - 12, 640)
+            width: Math.min(outerRow.width - 36 - 16, 640)
             spacing: 0
 
-            // 思考秒数（仅 AI，无论思考按钮开/关都显示）
+            // 重写中 / 搜索中（实时计时）；完成时显示：重写 Xs  搜索 Xs（秒）
+            Item {
+                width: parent.width
+                height: 20
+                visible: isAI && ragSearchStatus !== ""
+                Row {
+                    spacing: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                        text: ragSearchStatus === "rewriting" ? "✏️" : "🔍"
+                        font.pixelSize: 12
+                    }
+                    Text {
+                        text: {
+                            if (ragSearchStatus === "rewriting")
+                                return "重写中 " + ragElapsedTime.toFixed(1) + "s"
+                            if (ragSearchStatus === "searching")
+                                return "搜索中 " + ragElapsedTime.toFixed(1) + "s"
+                            var p = []
+                            if (rewriteDurationMs > 0) p.push("重写 " + (rewriteDurationMs / 1000).toFixed(1) + "s")
+                            if (searchDurationMs > 0) p.push("搜索 " + (searchDurationMs / 1000).toFixed(1) + "s")
+                            return p.length > 0 ? p.join("  ") : "—"
+                        }
+                        color: root.cMuted
+                        font.pixelSize: 11
+                        font.italic: true
+                    }
+                }
+            }
+
+            // 重写气泡（默认折叠，可点击展开）
+            Column {
+                width: parent.width
+                spacing: 4
+                visible: isAI && rewriteThinking !== "" && ragSearchStatus === "done"
+                Item {
+                    width: parent.width
+                    height: 22
+                    Row {
+                        spacing: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text {
+                            text: "✏️ 重写过程"
+                            color: root.cMuted
+                            font.pixelSize: 11
+                            font.italic: true
+                        }
+                        Text {
+                            text: root.rewriteThinkExpanded ? " ▲" : " ▼"
+                            color: root.cMuted
+                            font.pixelSize: 11
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.rewriteThinkExpanded = !root.rewriteThinkExpanded
+                    }
+                }
+                Rectangle {
+                    width: parent.width - 8
+                    visible: root.rewriteThinkExpanded
+                    height: visible && rewriteThinkLoader.item ? (rewriteThinkLoader.item.implicitHeight || rewriteThinkLoader.item.height) + 12 : 0
+                    color: root.cThinkBg
+                    radius: 12
+                    border.width: 1
+                    border.color: root.cThinkBorder
+                    Loader {
+                        id: rewriteThinkLoader
+                        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
+                        sourceComponent: (root.hasMath(rewriteThinking) || root.hasCodeBlocks(rewriteThinking) || root.hasTable(rewriteThinking)) ? mathRenderComp : mdRenderComp
+                        onLoaded: {
+                            item.textColor = root.cMuted
+                            item.fontSize = 12
+                        }
+                    }
+                    Binding {
+                        target: rewriteThinkLoader.item
+                        property: "markdownText"
+                        value: rewriteThinking || ""
+                        when: rewriteThinkLoader.item
+                    }
+                }
+            }
+
+            // 搜索完成但无结果时的提示
+            Text {
+                width: parent.width - 8
+                visible: isAI && ragSearchStatus === "done" && (!ragLinks || ragLinks.length === 0)
+                text: "未获取到搜索结果，可能是网络或搜索引擎解析问题，可尝试切换搜索引擎或代理。"
+                color: root.cMuted
+                font.pixelSize: 11
+                font.italic: true
+                wrapMode: Text.WordWrap
+            }
+            // 搜索得到的网页列表（ChatGPT 风格：可复制、可打开）
+            Column {
+                width: parent.width - 8
+                spacing: 8
+                visible: isAI && ragLinks && ragLinks.length > 0
+                Repeater {
+                    model: root.ragLinks
+                    delegate: Rectangle {
+                        width: parent.width - 4
+                        radius: 8
+                        color: ragCardHover.hovered ? (root.isLight ? "#EBEDF1" : "#2A2C30") : (root.isLight ? "#F0F2F5" : "#25272A")
+                        border.color: root.cThinkBorder
+                        implicitHeight: ragCardCol.implicitHeight + 16
+
+                        Column {
+                            id: ragCardCol
+                            width: parent.width - 24
+                            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 12 }
+                            spacing: 6
+                            // 可复制的正文：标题 + 摘要 + URL
+                            TextArea {
+                                id: ragContentArea
+                                width: parent.width - 4
+                                leftPadding: 0; rightPadding: 0; topPadding: 0; bottomPadding: 0
+                                background: Item {}
+                                readOnly: true
+                                selectByMouse: true
+                                wrapMode: TextArea.Wrap
+                                textFormat: TextArea.PlainText
+                                font.pixelSize: 12
+                                color: root.cTextAi
+                                text: {
+                                    var d = modelData
+                                    if (!d) return ""
+                                    var trunc = function(s, n) { return (s && s.length > n) ? s.substring(0, n) + "…" : (s || "") }
+                                    var idx = (d.index || (model.index + 1))
+                                    var rawTitle = d.text || ""
+                                    var rawSnip = d.snippet || ""
+                                    var rawUrl = (d.url || "")
+                                    var title = trunc(rawTitle, 20)
+                                    var snip = trunc(rawSnip, 40)
+                                    var url = trunc(rawUrl, 20)
+                                    if (rawSnip && rawSnip !== rawTitle && rawSnip.length > 2)
+                                        return "[" + idx + "] " + title + "\n" + snip + "\n" + url
+                                    return "[" + idx + "] " + title + "\n" + url
+                                }
+                            }
+                            Row {
+                                spacing: 8
+                                // 打开链接按钮（不阻挡复制）
+                                Rectangle {
+                                    width: openBtnText.implicitWidth + 16
+                                    height: 24
+                                    radius: 4
+                                    color: openBtnHover.hovered ? (root.isLight ? "#D8D8DC" : "#3A3C40") : (root.isLight ? "#E8E8EC" : "#2E3035")
+                                    Text {
+                                        id: openBtnText
+                                        anchors.centerIn: parent
+                                        text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? (localeBridge.t.openLink || "打开链接") : "打开链接"
+                                        font.pixelSize: 11
+                                        color: root.cMuted
+                                    }
+                                    HoverHandler { id: openBtnHover }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            var u = (modelData && modelData.url) ? modelData.url : ""
+                                            if (u && typeof clipboardBridge !== "undefined" && clipboardBridge)
+                                                clipboardBridge.openUrl(u)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        HoverHandler { id: ragCardHover }
+                    }
+                }
+            }
+
+            // 思考状态（仅 AI）：思考中 / 思考完成
             Item {
                 width: parent.width
                 height: 20
@@ -124,10 +330,10 @@ Item {
                     Text {
                         text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0)
                             ? (isThinking
-                                ? (localeBridge.t.thinkingInProgress || "Thinking... ") + thinkTime.toFixed(1) + (localeBridge.t.thinkingSeconds || "s")
-                                : (localeBridge.t.thinkingDone || "Done (") + thinkTime.toFixed(1) + (localeBridge.t.thinkingSeconds || "s)") +
+                                ? (localeBridge.t.thinkingInProgress || "思考中... ") + thinkTime.toFixed(1) + (localeBridge.t.thinkingSeconds || "s")
+                                : (localeBridge.t.thinkingDone || "思考完成 (") + thinkTime.toFixed(1) + (localeBridge.t.thinkingSeconds || "s)") +
                                 (settings.showThinking && thinkingContent !== "" ? (thinkExpanded ? "  ▲" : "  ▼") : ""))
-                            : (isThinking ? "Thinking... " + thinkTime.toFixed(1) + "s" : "Done (" + thinkTime.toFixed(1) + "s)" +
+                            : (isThinking ? "思考中... " + thinkTime.toFixed(1) + "s" : "思考完成 (" + thinkTime.toFixed(1) + "s)" +
                             (settings.showThinking && thinkingContent !== "" ? (thinkExpanded ? "  ▲" : "  ▼") : ""))
                         color: root.cMuted
                         font.pixelSize: 11
@@ -141,25 +347,238 @@ Item {
                 }
             }
 
-            // 思考过程展开内容（仅当思考按钮打开时显示）
+            // ── 分块模式（agent/planning）：思考→回复→工具 分段显示 ──
+            Column {
+                width: parent.width
+                spacing: 8
+                visible: root.useBlocks
+
+                Repeater {
+                    model: root.blocks
+                    delegate: Item {
+                        width: parent.width - 16
+                        height: blockCol.implicitHeight
+                        Column {
+                            id: blockCol
+                            width: parent.width
+                            spacing: 4
+
+                            // 思考块
+                            Rectangle {
+                                width: parent.width
+                                visible: modelData.type === "thinking" && (settings.showThinking && modelData.content !== "")
+                                height: visible && thinkBlkLoader.item ? (thinkBlkLoader.item.implicitHeight || thinkBlkLoader.item.height) + 12 : 0
+                                color: root.cThinkBg
+                                radius: 12
+                                border.width: 1
+                                border.color: root.cThinkBorder
+
+                                Loader {
+                                    id: thinkBlkLoader
+                                    anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
+                                    sourceComponent: (root.hasMath(modelData.content) || root.hasCodeBlocks(modelData.content) || root.hasTable(modelData.content)) ? mathRenderComp : mdRenderComp
+                                    onLoaded: {
+                                        item.textColor = root.cMuted
+                                        item.fontSize = 12
+                                    }
+                                }
+                                Binding {
+                                    target: thinkBlkLoader.item
+                                    property: "markdownText"
+                                    value: modelData.content || ""
+                                    when: thinkBlkLoader.item
+                                }
+                            }
+
+                            // 回复块
+                            Rectangle {
+                                width: parent.width
+                                visible: modelData.type === "reply" && modelData.content !== ""
+                                implicitHeight: visible ? (replyLoader.item ? (replyLoader.item.implicitHeight || replyLoader.item.height) + 20 : 0) : 0
+                                color: root.cBubbleAi
+                                radius: 16
+                                border.width: 1
+                                border.color: root.cBubbleAiBorder
+
+                                Loader {
+                                    id: replyLoader
+                                    width: parent.width - 24
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 8
+                                    sourceComponent: (root.hasMath(modelData.content) || root.hasCodeBlocks(modelData.content) || root.hasTable(modelData.content)) ? mathRenderComp : mdRenderComp
+                                    onLoaded: item.textColor = root.cTextAi
+                                }
+                                Binding {
+                                    target: replyLoader.item
+                                    property: "markdownText"
+                                    value: modelData.content || ""
+                                    when: replyLoader.item
+                                }
+                            }
+
+                            // 工具调用块：显示工具名、参数、执行结果
+                            Rectangle {
+                                width: parent.width
+                                visible: modelData.type === "tool"
+                                implicitHeight: visible ? toolCol.implicitHeight + 18 : 0
+                                color: root.isLight ? "#F1F5F9" : "#374151"
+                                radius: 12
+                                border.width: 1
+                                border.color: root.cThinkBorder
+
+                                Column {
+                                    id: toolCol
+                                    width: parent.width - 16
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 8
+                                    anchors.bottomMargin: 8
+                                    spacing: 6
+
+                                    Text {
+                                        text: "🔧 " + (modelData.toolName || "")
+                                        color: root.cMuted
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        visible: {
+                                            var a = modelData.args
+                                            return !!(a && Object.keys(a).length > 0)
+                                        }
+                                        text: {
+                                            var a = modelData.args
+                                            if (!a) return ""
+                                            var parts = []
+                                            for (var k in a) parts.push(k + ": " + a[k])
+                                            return parts.join("\n")
+                                        }
+                                        color: root.cMuted
+                                        font.pixelSize: 11
+                                        font.family: "monospace"
+                                        wrapMode: Text.Wrap
+                                    }
+                                    // web_search 专用：可点击的链接列表（与 chat 模式 ragLinks 一致）
+                                    Column {
+                                        width: parent.width
+                                        visible: {
+                                            if ((modelData.toolName || "") !== "web_search") return false
+                                            try {
+                                                var j = JSON.parse(modelData.result || "{}")
+                                                return j.related && Array.isArray(j.related) && j.related.length > 0
+                                            } catch(e) { return false }
+                                        }
+                                        spacing: 4
+                                        Repeater {
+                                            model: {
+                                                var r = []
+                                                try {
+                                                    var j = JSON.parse(modelData.result || "{}")
+                                                    if (j.related && Array.isArray(j.related))
+                                                        for (var i = 0; i < j.related.length; i++)
+                                                            r.push({text: (j.related[i].title || j.related[i].text || ""), url: (j.related[i].url || "")})
+                                                } catch(e) {}
+                                                return r
+                                            }
+                                            delegate: Rectangle {
+                                                width: toolCol.width - 4
+                                                height: webLinkRow.implicitHeight + 12
+                                                radius: 6
+                                                color: webLinkHover.hovered ? (root.isLight ? "#EBEDF1" : "#2A2C30") : (root.isLight ? "#F0F2F5" : "#25272A")
+                                                border.color: root.cThinkBorder
+                                                Row {
+                                                    id: webLinkRow
+                                                    anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 10 }
+                                                    spacing: 8
+                                                    Text { text: "🔗"; font.pixelSize: 12; color: root.cMuted; anchors.verticalCenter: parent.verticalCenter }
+                                                    Text {
+                                                        width: parent.width - 40
+                                                        text: {
+                                                            var t = (modelData && modelData.text) ? modelData.text : ""
+                                                            return (t && t.length > 20) ? t.substring(0, 20) + "…" : t
+                                                        }
+                                                        color: root.cTextAi
+                                                        font.pixelSize: 12
+                                                        elide: Text.ElideRight
+                                                        wrapMode: Text.WordWrap
+                                                        maximumLineCount: 2
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                    }
+                                                }
+                                                HoverHandler { id: webLinkHover }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    hoverEnabled: true
+                                                    onClicked: {
+                                                        var u = (modelData && modelData.url) ? modelData.url : ""
+                                                        if (u && typeof clipboardBridge !== "undefined" && clipboardBridge)
+                                                            clipboardBridge.openUrl(u)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        visible: {
+                                            if ((modelData.toolName || "") === "web_search") {
+                                                try {
+                                                    var j = JSON.parse(modelData.result || "{}")
+                                                    return !(j.related && Array.isArray(j.related) && j.related.length > 0)
+                                                } catch(e) { return true }
+                                            }
+                                            return true
+                                        }
+                                        text: {
+                                            var r = modelData.result || ""
+                                            try {
+                                                var j = JSON.parse(r)
+                                                if (j.error) return "❌ " + j.error
+                                                if ((modelData.toolName || "") === "web_search") {
+                                                    if (j.abstract) return j.abstract
+                                                    if (j.searchUrl) return "未解析到结果，请访问 searchUrl 手动搜索。"
+                                                }
+                                                if (typeof j.exitCode !== "undefined")
+                                                    return "退出码: " + j.exitCode + (j.stdout ? "\n\n" + j.stdout : "")
+                                                if (j.stdout) return j.stdout
+                                            } catch(e) {}
+                                            return r
+                                        }
+                                        color: root.cTextAi
+                                        font.pixelSize: 12
+                                        font.family: "monospace"
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 传统模式（chat）：单一思考+单一回复 ──
             Column {
                 width: parent.width
                 spacing: 4
-                visible: settings.showThinking && isAI
+                visible: !root.useBlocks && settings.showThinking && isAI
 
                 Rectangle {
                     id: thinkBox
                     width: parent.width
                     visible: thinkExpanded && thinkingContent !== ""
-                    height: visible && thinkLoader.item ? (thinkLoader.item.implicitHeight || thinkLoader.item.height) + 10 : 0
+                    height: visible && thinkLoader.item ? (thinkLoader.item.implicitHeight || thinkLoader.item.height) + 12 : 0
                     color: root.cThinkBg
-                    radius: 8
+                    radius: 12
+                    border.width: 1
                     border.color: root.cThinkBorder
 
                     Loader {
                         id: thinkLoader
                         anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
-                        sourceComponent: (root.hasMath(root.thinkingContent) || root.hasCodeBlocks(root.thinkingContent)) ? mathRenderComp : mdRenderComp
+                        sourceComponent: (root.hasMath(root.thinkingContent) || root.hasCodeBlocks(root.thinkingContent) || root.hasTable(root.thinkingContent)) ? mathRenderComp : mdRenderComp
                         onLoaded: {
                             item.markdownText = root.thinkingContent
                             item.textColor = root.cMuted
@@ -169,45 +588,44 @@ Item {
                 }
             }
 
-            // 思考占位
             Text {
                 width: parent.width
-                visible: settings.showThinking && isAI && root.msgContent === "" && root.isThinking
+                visible: !root.useBlocks && settings.showThinking && isAI && root.msgContent === "" && root.isThinking
                 text: "▍"
                 color: root.cMuted
                 font.pixelSize: 14
             }
 
-            // 气泡主体（ChatGPT 风格：AI 浅灰，用户蓝色）
             Rectangle {
                 id: bubble
                 width: parent.width
-                implicitHeight: contentCol.implicitHeight + 16
+                visible: !root.useBlocks
+                implicitHeight: visible ? (contentCol.implicitHeight + 20) : 0
                 color: isAI ? root.cBubbleAi : root.cBubbleUser
-                radius: 12
+                radius: 16
+                border.width: 1
+                border.color: isAI ? root.cBubbleAiBorder : root.cBubbleUserBorder
 
                 Column {
                     id: contentCol
-                    width: parent.width - 24
+                    width: parent.width - 28
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
-                    topPadding: 8
-                    bottomPadding: 8
-                    spacing: 8
+                    topPadding: 12
+                    bottomPadding: 12
+                    spacing: 10
 
-                    // 正文
                     Loader {
                         id: contentLoader
                         width: contentCol.width
                         visible: root.msgContent !== "" && !root.editing
-                        sourceComponent: (root.hasMath(root.msgContent) || root.hasCodeBlocks(root.msgContent)) ? mathRenderComp : mdRenderComp
+                        sourceComponent: (root.hasMath(root.msgContent) || root.hasCodeBlocks(root.msgContent) || root.hasTable(root.msgContent)) ? mathRenderComp : mdRenderComp
                         onLoaded: {
                             item.markdownText = root.msgContent
                             item.textColor = isAI ? root.cTextAi : root.cTextUser
                         }
                     }
 
-                    // 编辑模式
                     Column {
                         width: parent.width
                         spacing: 8
@@ -223,8 +641,8 @@ Item {
                             wrapMode: TextArea.Wrap
                             background: Rectangle {
                                 color: root.cEditBg
-                                radius: 6
-                                border.color: "#5865F2"
+                                radius: 8
+                                border.color: root.isLight ? "#4F46E5" : "#6366F1"
                                 border.width: 1
                             }
                             padding: 10
@@ -267,8 +685,8 @@ Item {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (currentVersion > 1)
-                                    root.currentVersion = currentVersion - 1
+                                if (currentVersion > 1 && typeof mainView !== "undefined")
+                                    mainView.setUserMessageVersion(root.messageIndex, currentVersion - 2)
                             }
                         }
                     }
@@ -276,7 +694,7 @@ Item {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: currentVersion + "/" + totalVersions
-                        color: "#B5BAC1"
+                        color: root.cActionText
                         font.pixelSize: 11
                     }
 
@@ -297,8 +715,8 @@ Item {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (currentVersion < totalVersions)
-                                    root.currentVersion = currentVersion + 1
+                                if (currentVersion < totalVersions && typeof mainView !== "undefined")
+                                    mainView.setUserMessageVersion(root.messageIndex, currentVersion)
                             }
                         }
                     }
@@ -333,7 +751,7 @@ Item {
                         width: 44
                         height: 24
                         radius: 4
-                        color: saveHover.hovered ? "#6B7AF2" : "#5865F2"
+                        color: saveHover.hovered ? "#6366F1" : (root.isLight ? "#4F46E5" : "#6366F1")
                         Text {
                             anchors.centerIn: parent
                             text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.save : "Save"

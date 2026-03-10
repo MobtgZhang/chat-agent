@@ -8,7 +8,7 @@ set(CMAKE_AUTORCC ON)
 
 # ── 依赖查找 ────────────────────────────────────────────────────────────────
 find_package(Qt6 REQUIRED COMPONENTS
-    Core Gui Quick QuickControls2 Network Sql WebEngineQuick WebChannel
+    Core Gui Quick QuickControls2 Network Sql WebEngineQuick WebChannel Concurrent
 )
 
 # ── 可执行文件 ──────────────────────────────────────────────────────────────
@@ -21,6 +21,7 @@ qt_add_executable(appAIChat
     src/historylistmodel.h src/historylistmodel.cpp
     src/messagemodel.h src/messagemodel.cpp
     src/mainview.h src/mainview.cpp
+    src/web_search_service.h src/web_search_service.cpp
     # Agent 模块
     src/agent_core.h src/agent_core.cpp
     src/llm_backend.h src/llm_backend.cpp
@@ -50,6 +51,30 @@ qt_add_resources(appAIChat "qml_res"
         src/qml/MarkdownRender.qml
         src/qml/MarkdownMathRender.qml
         src/qml/md_render.html
+        src/qml/md_libs/marked.min.js
+        src/qml/md_libs/katex.min.css
+        src/qml/md_libs/katex.min.js
+        src/qml/md_libs/contrib/auto-render.min.js
+        src/qml/md_libs/fonts/KaTeX_AMS-Regular.woff2
+        src/qml/md_libs/fonts/KaTeX_Caligraphic-Bold.woff2
+        src/qml/md_libs/fonts/KaTeX_Caligraphic-Regular.woff2
+        src/qml/md_libs/fonts/KaTeX_Fraktur-Bold.woff2
+        src/qml/md_libs/fonts/KaTeX_Fraktur-Regular.woff2
+        src/qml/md_libs/fonts/KaTeX_Main-Bold.woff2
+        src/qml/md_libs/fonts/KaTeX_Main-BoldItalic.woff2
+        src/qml/md_libs/fonts/KaTeX_Main-Italic.woff2
+        src/qml/md_libs/fonts/KaTeX_Main-Regular.woff2
+        src/qml/md_libs/fonts/KaTeX_Math-BoldItalic.woff2
+        src/qml/md_libs/fonts/KaTeX_Math-Italic.woff2
+        src/qml/md_libs/fonts/KaTeX_SansSerif-Bold.woff2
+        src/qml/md_libs/fonts/KaTeX_SansSerif-Italic.woff2
+        src/qml/md_libs/fonts/KaTeX_SansSerif-Regular.woff2
+        src/qml/md_libs/fonts/KaTeX_Script-Regular.woff2
+        src/qml/md_libs/fonts/KaTeX_Size1-Regular.woff2
+        src/qml/md_libs/fonts/KaTeX_Size2-Regular.woff2
+        src/qml/md_libs/fonts/KaTeX_Size3-Regular.woff2
+        src/qml/md_libs/fonts/KaTeX_Size4-Regular.woff2
+        src/qml/md_libs/fonts/KaTeX_Typewriter-Regular.woff2
         src/icons/copy.svg
         src/icons/copy_light.svg
         src/icons/pencil.svg
@@ -72,6 +97,9 @@ qt_add_resources(appAIChat "qml_res"
         src/translations/ja.json
 )
 
+# ── 包含路径 ──────────────────────────────────────────────────────────────────
+target_include_directories(appAIChat PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 # ── 链接 ─────────────────────────────────────────────────────────────────────
 target_link_libraries(appAIChat PRIVATE
     Qt6::Core
@@ -82,6 +110,7 @@ target_link_libraries(appAIChat PRIVATE
     Qt6::Sql
     Qt6::WebEngineQuick
     Qt6::WebChannel
+    Qt6::Concurrent
 )
 
 # ── Windows 隐藏控制台窗口 ──────────────────────────────────────────────────
@@ -93,4 +122,20 @@ endif()
 if(APPLE)
     set_target_properties(appAIChat PROPERTIES MACOSX_BUNDLE TRUE)
 endif()
+
+# ── 历史消息调试（验证 editHistory/branchTails 逻辑）──────────────────────────
+qt_add_executable(test_history_debug
+    src/test_history_debug.cpp
+    src/messagemodel.cpp
+)
+target_link_libraries(test_history_debug PRIVATE Qt6::Core)
+target_include_directories(test_history_debug PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+# ── 搜索调试 CLI（diagnose DuckDuckGo search/proxy）──────────────────────────
+qt_add_executable(search_debug_cli
+    src/tools/search_debug_cli.cpp
+    src/web_search_service.cpp
+)
+target_include_directories(search_debug_cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(search_debug_cli PRIVATE Qt6::Core Qt6::Network)
 
