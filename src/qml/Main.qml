@@ -3,6 +3,8 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Dialogs
+import QtWebEngine 1.15
+import QtWebChannel 1.15
 
 ApplicationWindow {
     id: appWindow
@@ -27,6 +29,14 @@ ApplicationWindow {
     readonly property color cScrollBar: isLight ? "#CBD5E1" : "#475569"
     readonly property color cScrollBarHover: isLight ? "#94A3B8" : "#64748B"
     readonly property color cPopupBg: isLight ? "#FFFFFF" : "#1E293B"
+
+    // 关闭主窗口时直接退出应用，避免进程在后台残留
+    onClosing: {
+        Qt.quit()
+    }
+
+    // ── 技能面板展开状态 ──────────────────────────────────────────────────────
+    property bool skillsExpanded: true
 
     // ── 弹窗（懒创建）────────────────────────────────────────────────────────
     property var settingsWin: null
@@ -569,11 +579,144 @@ ApplicationWindow {
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: cDivider }
 
+                // ── 智能体技能面板（可折叠，滑动浏览）─────────────────────────────
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 36
+                        color: "transparent"
+
+                        RowLayout {
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            spacing: 6
+
+                            Text {
+                                text: skillsExpanded ? "▼" : "▶"
+                                color: cMuted
+                                font.pixelSize: 10
+                            }
+                            Text {
+                                text: "🛠 " + ((localeBridge && localeBridge.t && localeBridge.tVersion >= 0 && localeBridge.t.skills) ? localeBridge.t.skills : "Skills")
+                                color: cText
+                                font.pixelSize: 13
+                                font.bold: true
+                            }
+                            Item { Layout.fillWidth: true }
+                            Rectangle {
+                                width: 22; height: 18; radius: 9
+                                color: cAccent
+                                visible: typeof skillManager !== "undefined" && skillManager && skillManager.skills.length > 0
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: (typeof skillManager !== "undefined" && skillManager) ? skillManager.skills.length : "0"
+                                    color: "white"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                }
+                            }
+                        }
+
+                        HoverHandler { id: skillHeaderHover }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: skillsExpanded = !skillsExpanded
+                        }
+                    }
+
+                    ListView {
+                        id: skillsListView
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: skillsExpanded ? Math.min(contentHeight, 200) : 0
+                        Layout.maximumHeight: 200
+                        visible: skillsExpanded
+                        clip: true
+                        spacing: 4
+                        model: (typeof skillManager !== "undefined" && skillManager) ? skillManager.skills : []
+
+                        Behavior on Layout.preferredHeight {
+                            NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+                        }
+
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            contentItem: Rectangle {
+                                implicitWidth: 4
+                                radius: 2
+                                color: parent.pressed ? cScrollBarHover : (parent.hovered ? cScrollBarHover : cScrollBar)
+                            }
+                        }
+
+                        delegate: Rectangle {
+                            width: skillsListView.width - 16
+                            x: 8
+                            height: 56
+                            radius: 8
+                            color: skillCardHover.hovered ? cHighlight : (isLight ? "#F1F5F9" : "#1E293B")
+                            border.color: skillCardHover.hovered ? cAccent : cBorder
+                            border.width: skillCardHover.hovered ? 1 : 0
+
+                            RowLayout {
+                                anchors { fill: parent; margins: 8 }
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 36; height: 36; radius: 8
+                                    color: isLight ? "#EEF2FF" : "#312E81"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: modelData.icon || "🔧"
+                                        font.pixelSize: 18
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    Text {
+                                        text: modelData.title || ""
+                                        color: cText
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                    Text {
+                                        property string ct: modelData.content ? String(modelData.content) : ""
+                                        text: ct.length > 30 ? ct.substring(0, 30) + "…" : ct
+                                        color: cMuted
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+
+                            HoverHandler { id: skillCardHover }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    skillDetailPopup.skillTitle   = modelData.title || ""
+                                    skillDetailPopup.skillIcon    = modelData.icon  || "🔧"
+                                    skillDetailPopup.skillContent = modelData.content || ""
+                                    skillDetailPopup.open()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: cDivider }
+
                 // ── Agent Memory（自动总结的记忆，可删除）───────────────────────────
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Layout.topMargin: 8
-                    spacing: 6
+                    Layout.topMargin: 4
+                    spacing: 4
 
                     Text {
                         text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? ("🧠 " + localeBridge.t.agentMemory) : "Agent Memory"
@@ -585,7 +728,7 @@ ApplicationWindow {
 
                     ScrollView {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 120
+                        Layout.preferredHeight: 90
                         clip: true
                         ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
@@ -594,33 +737,33 @@ ApplicationWindow {
                             spacing: 2
                             delegate: Rectangle {
                                 width: ListView.view.width - 4
-                                height: 32
+                                height: 30
                                 radius: 4
                                 color: memHover.hovered ? cHighlight : "transparent"
 
                                 RowLayout {
                                     anchors.fill: parent
-                                    anchors.margins: 6
-                                    spacing: 6
+                                    anchors.margins: 5
+                                    spacing: 4
                                     Text {
                                         text: modelData.key + ":"
                                         color: cAccent
-                                        font.pixelSize: 11
+                                        font.pixelSize: 10
                                         font.bold: true
-                                        Layout.preferredWidth: 60
+                                        Layout.preferredWidth: 55
                                         elide: Text.ElideRight
                                     }
                                     Text {
                                         text: modelData.value
                                         color: cText
-                                        font.pixelSize: 11
+                                        font.pixelSize: 10
                                         Layout.fillWidth: true
                                         elide: Text.ElideRight
                                     }
                                     Text {
                                         text: "×"
                                         color: memDelHover.hovered ? "#ED4245" : cMuted
-                                        font.pixelSize: 12
+                                        font.pixelSize: 11
                                         HoverHandler { id: memDelHover }
                                         MouseArea {
                                             anchors.fill: parent
@@ -641,7 +784,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.leftMargin: 10
                         Layout.rightMargin: 10
-                        height: 28
+                        height: 24
                         visible: agentMemory && agentMemory.longTermFacts.length > 0
                         color: memClearHover.hovered ? "#5C2E2E" : "transparent"
                         radius: 4
@@ -650,7 +793,7 @@ ApplicationWindow {
                         Row {
                             anchors.centerIn: parent
                             spacing: 4
-                            Text { text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.clearAllMemory : ""; color: "#ED4245"; font.pixelSize: 11 }
+                            Text { text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.clearAllMemory : ""; color: "#ED4245"; font.pixelSize: 10 }
                         }
                         HoverHandler { id: memClearHover }
                         MouseArea {
@@ -828,36 +971,6 @@ ApplicationWindow {
                         }
                     }
 
-                    // 显示/隐藏思考过程
-                    Rectangle {
-                        height: 30; radius: 5
-                        width: thinkRow.implicitWidth + 24
-                        Layout.minimumWidth: thinkRow.implicitWidth + 24
-                        color: thinkToggleHover.hovered
-                            ? Qt.lighter(cHighlight, 1.12)
-                            : (settings.showThinking ? cSelectedBg : cHighlight)
-                        border.color: settings.showThinking ? cAccent : "transparent"
-                        Row {
-                            id: thinkRow
-                            anchors.centerIn: parent
-                            spacing: 6
-                            Text { text: "🧠"; font.pixelSize: 12 }
-                            Text {
-                                text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? (settings.showThinking ? localeBridge.t.thinkingOn : localeBridge.t.thinkingOff) : (settings.showThinking ? "Thinking: On" : "Thinking: Off")
-                                color: cText
-                                font.pixelSize: 12
-                            }
-                        }
-                        ToolTip.text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? (settings.showThinking ? localeBridge.t.thinkingTooltipOn : localeBridge.t.thinkingTooltipOff) : (settings.showThinking ? "Click to hide thinking" : "Click to show thinking")
-                        ToolTip.visible: thinkToggleHover.hovered
-                        ToolTip.delay: 600
-                        HoverHandler { id: thinkToggleHover }
-                        MouseArea {
-                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                            onClicked: settings.showThinking = !settings.showThinking
-                        }
-                    }
-
                     // 导出对话（右上角）
                     Rectangle {
                         height: 30; radius: 5
@@ -914,6 +1027,8 @@ ApplicationWindow {
                                 wrapMode: TextArea.Wrap
                                 background: null
                                 enabled: typeof mainView !== "undefined" ? !mainView.isStreaming : true
+                                // 明确支持多行与 IME，便于 Windows/Linux 下中文等输入法候选框正常显示
+                                inputMethodHints: Qt.ImhMultiLine
 
                                 Keys.onPressed: (event) => {
                                     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -1137,117 +1252,71 @@ ApplicationWindow {
                 }
             }
 
-            // ── 消息列表 ──────────────────────────────────────────────────────
-            ListView {
-                id: chatListView
+            // ── 消息列表：完全交给 WebEngine + HTML/JS ─────────────────────────
+            WebChannel {
+                id: chatChannel
+            }
+
+            WebEngineView {
+                id: chatWebView
                 anchors {
                     top:    chatHeader.bottom
                     bottom: inputPanel.top
                     left:   parent.left
                     right:  parent.right
                 }
-                clip: true
-                spacing: 12
-                topMargin: 20; bottomMargin: 16
-                leftMargin: 20; rightMargin: 20
-                cacheBuffer: 3000
-                reuseItems: true
+                backgroundColor: "transparent"
+                settings.javascriptEnabled: true
+                settings.localContentCanAccessFileUrls: true
+                settings.localContentCanAccessRemoteUrls: true
 
-                ScrollBar.vertical: ScrollBar {
-                    policy: ScrollBar.AsNeeded
-                    contentItem: Rectangle {
-                        implicitWidth: 6
-                        radius: 3
-                        color: parent.pressed ? cScrollBarHover : (parent.hovered ? cScrollBarHover : cScrollBar)
+                // 同步当前 QML 中的主题到 HTML 内部，通过 appWindow.isLight 判断，
+                // 避免 WebEngineView.settings 遮蔽全局 Settings 对象。
+                function syncChatTheme() {
+                    if (chatWebView.loading)
+                        return;
+                    // NOTE: 不能直接用 settings.theme，因为 WebEngineView 自带的
+                    // settings 属性（WebEngineSettings）会遮蔽 C++ 注入的全局 Settings。
+                    // 改用 ApplicationWindow 根节点上的 isLight 属性。
+                    var light = appWindow.isLight;
+                    var js =
+                        "document.body.classList.remove('theme-dark','theme-light');" +
+                        "document.body.classList.add('" + (light ? "theme-light" : "theme-dark") + "');" +
+                        "document.body.style.setProperty('--bubble-ai','" + (light ? "#F0F2F5" : "#2A2F3A") + "');" +
+                        "document.body.style.setProperty('--bubble-user','" + (light ? "#E8ECF0" : "#323842") + "');" +
+                        "document.body.style.setProperty('--border-subtle','" + (light ? "#DDE2E8" : "#3E4553") + "');" +
+                        "document.body.style.setProperty('--text','" + (light ? "#1A202C" : "#F1F5F9") + "');" +
+                        "document.body.style.setProperty('--text-muted','" + (light ? "#6B7280" : "#9CA3AF") + "');" +
+                        "window.isLightTheme = " + (light ? "true" : "false") + ";" +
+                        "lastMessagesKey = '';";
+                    chatWebView.runJavaScript(js);
+                }
+
+                Component.onCompleted: {
+                    // 将核心对象暴露给 JS，由单页 Web 聊天 UI 完成头像/气泡/滚动等全部渲染
+                    chatChannel.registerObject("mainView", mainView)
+                    chatChannel.registerObject("settings", settings)
+                    chatChannel.registerObject("history", history)
+                    chatChannel.registerObject("clipboard", clipboardBridge)
+                    webChannel = chatChannel
+                    url = "qrc:/src/qml/chat_render.html"
+                }
+
+                // 页面加载完一次后，同步一次主题，保证初次打开时左右两侧配色一致
+                onLoadingChanged: function(loadRequest) {
+                    if (!loadRequest.isLoading) {
+                        syncChatTheme();
                     }
-                    background: Rectangle {
-                        implicitWidth: 6
-                        color: cDivider
-                        radius: 3
+                }
+
+                // 当用户在“系统设置 → 主题设置”中切换 Dark / Light 时，
+                // 主 QML 已经立刻更新自身配色，这里直接把最新 theme 推送给 HTML。
+                Connections {
+                    target: appWindow
+                    function onIsLightChanged() {
+                        chatWebView.syncChatTheme();
                     }
                 }
-
-                model: mainView.messagesModel
-
-                delegate: ChatMessage {
-                    width: chatListView.width
-                    role: (model && model.role) ? model.role : "user"
-                    // 依赖 editVersion 强制在切换历史版本时重新求值，确保 model.content 更新能传到气泡
-                    msgContent: {
-                        if (!model) return ""
-                        var _ = model.editVersion
-                        return (model.content !== undefined && model.content !== null) ? model.content : ""
-                    }
-                    thinkingContent: (model && model.thinking) ? model.thinking : ""
-                    isThinking: (model && model.isThinking) ? true : false
-                    blocks: (model && model.blocks) ? model.blocks : []
-                    ragSearchStatus: (model && model.ragSearchStatus) ? model.ragSearchStatus : ""
-                    ragLinks: (model && model.ragLinks) ? model.ragLinks : []
-                    rewriteDurationMs: (model && model.rewriteDurationMs !== undefined) ? model.rewriteDurationMs : 0
-                    rewriteThinking: (model && model.rewriteThinking) ? model.rewriteThinking : ""
-                    searchDurationMs: (model && model.searchDurationMs !== undefined) ? model.searchDurationMs : 0
-                    messageIndex:     index
-                    currentVersion:   (model && model.editVersion !== undefined) ? model.editVersion : 1
-                    totalVersions:   (model && model.editTotal !== undefined) ? model.editTotal : 1
-                }
-
-                onCountChanged: Qt.callLater(function() {
-                    if (typeof mainView !== "undefined" && (mainView.isStreaming || atYEnd))
-                        positionViewAtEnd()
-                })
-                onContentHeightChanged: Qt.callLater(function() {
-                    if (typeof mainView !== "undefined" && (mainView.isStreaming || atYEnd))
-                        positionViewAtEnd()
-                })
-            }
-
-            // 覆盖层：鼠标置于对话区域时，滚轮可上下滚动对话列表（acceptedButtons: NoButton 不拦截点击）
-            MouseArea {
-                anchors {
-                    top: chatHeader.bottom
-                    bottom: inputPanel.top
-                    left: parent.left
-                    right: parent.right
-                }
-                z: 10
-                acceptedButtons: Qt.NoButton
-                onWheel: function(wheel) {
-                    // 这里是调节鼠标滑动速度，现在是2倍速度
-                    var dy = wheel.angleDelta.y * 2
-                    if (chatListView.verticalOvershoot !== 0.0 ||
-                        (dy > 0 && chatListView.verticalVelocity <= 0) ||
-                        (dy < 0 && chatListView.verticalVelocity >= 0)) {
-                        chatListView.flick(0, dy - chatListView.verticalVelocity)
-                    } else {
-                        chatListView.cancelFlick()
-                    }
-                    wheel.accepted = true
-                }
-            }
-
-            Timer {
-                interval: 200
-                repeat: true
-                running: typeof mainView !== "undefined" && mainView.isStreaming
-                onTriggered: {
-                    if (mainView.isStreaming && chatListView.atYEnd)
-                        chatListView.positionViewAtEnd()
-                }
-            }
-
-            // ── 右下角：对话进度 ────────────────────────────────────────────────
-            Text {
-                anchors {
-                    right: parent.right
-                    bottom: inputPanel.top
-                    rightMargin: 14
-                    bottomMargin: 4
-                }
-                text: chatListView.count > 0
-                      ? (chatListView.count + " / " + chatListView.count)
-                      : "0 / 0"
-                color: cMuted
-                font.pixelSize: 11
             }
         }
     }
@@ -1515,7 +1584,21 @@ ApplicationWindow {
 
         contentItem: ListView {
             clip: true
-            model: typeof settings !== "undefined" ? settings.modelList : []
+            // 引用外层 Popup，方便在 delegate 中关闭弹窗
+            property var popup: modelSelectPopup
+            model: {
+                if (typeof settings === "undefined" || !settings.modelList)
+                    return []
+                // 将模型列表视为循环列表：当前模型在最上面，当前模型之前的部分拼接到末尾
+                var raw = settings.modelList
+                var current = settings.modelName
+                var idx = raw.indexOf(current)
+                if (idx <= 0)
+                    return raw
+                var head = raw.slice(idx)      // 从当前模型开始到结尾
+                var tail = raw.slice(0, idx)   // 当前模型之前的部分
+                return head.concat(tail)
+            }
             spacing: 2
             implicitHeight: Math.min(contentHeight, 240)
 
@@ -1553,11 +1636,99 @@ ApplicationWindow {
                     onClicked: {
                         if (typeof settings !== "undefined")
                             settings.modelName = modelData
-                        modelSelectPopup.close()
+                        if (ListView.view && ListView.view.popup)
+                            ListView.view.popup.close()
                     }
                 }
             }
         }
+    }
+
+    // ── 技能详情弹窗 ────────────────────────────────────────────────────────
+    Dialog {
+        id: skillDetailPopup
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(appWindow.width * 0.6, 520)
+        height: Math.min(appWindow.height * 0.65, 480)
+
+        property string skillTitle: ""
+        property string skillIcon: "🔧"
+        property string skillContent: ""
+
+        background: Rectangle { color: cPopupBg; radius: 12; border.color: cBorder; border.width: 1 }
+
+        header: Rectangle {
+            width: parent ? parent.width : 0
+            height: 56
+            color: "transparent"
+            radius: 12
+
+            RowLayout {
+                anchors { fill: parent; leftMargin: 20; rightMargin: 16 }
+                spacing: 12
+
+                Rectangle {
+                    width: 36; height: 36; radius: 8
+                    color: isLight ? "#EEF2FF" : "#312E81"
+                    Text {
+                        anchors.centerIn: parent
+                        text: skillDetailPopup.skillIcon
+                        font.pixelSize: 18
+                    }
+                }
+
+                Text {
+                    text: skillDetailPopup.skillTitle
+                    color: cText
+                    font.pixelSize: 16
+                    font.bold: true
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    text: "✕"
+                    color: skillCloseHover.hovered ? "#ED4245" : cMuted
+                    font.pixelSize: 16
+                    HoverHandler { id: skillCloseHover }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: skillDetailPopup.close()
+                    }
+                }
+            }
+
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 1
+                color: cBorder
+            }
+        }
+
+        contentItem: Flickable {
+            clip: true
+            contentWidth: width
+            contentHeight: skillContentText.implicitHeight + 32
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            Text {
+                id: skillContentText
+                width: parent.width - 32
+                x: 16
+                y: 16
+                text: skillDetailPopup.skillContent
+                color: cText
+                font.pixelSize: 13
+                lineHeight: 1.6
+                wrapMode: Text.Wrap
+            }
+        }
+
+        footer: Item { height: 8 }
     }
 
     // ── 发送函数 ──────────────────────────────────────────────────────────────

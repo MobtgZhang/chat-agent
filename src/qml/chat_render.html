@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChatAgent Web Chat</title>
+  <!-- KaTeX 样式 -->
+  <link rel="stylesheet" href="qrc:/src/qml/md_libs/katex.min.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      /* 允许页面整体滚动，避免鼠标滚轮无法翻页的问题 */
+      overflow-y: auto;
+      overflow-x: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      /* 让背景完全由外层 QML 控制（cChatBg），这里保持透明，避免出现“整个右侧一整块黑色”的情况 */
+      background: transparent;
+    }
+    /* Dark：整体深色背景，由 QML 控制；这里让气泡是“灰黑色”，文字为白色 */
+    body.theme-dark {
+      /* AI 气泡：稍浅于纯黑的灰黑色 */
+      --bubble-ai: #2A2F3A;
+      /* 用户气泡：再浅一点，区分于 AI */
+      --bubble-user: #323842;
+      --border-subtle: #3E4553;
+      --text: #F1F5F9;
+      --text-muted: #9CA3AF;
+      color: var(--text);
+    }
+    /* Light：整体浅色背景，气泡为白灰色，文字为黑色 */
+    body.theme-light {
+      /* AI 气泡：接近白色的浅灰 */
+      --bubble-ai: #F0F2F5;
+      /* 用户气泡：略深一点的白灰色 */
+      --bubble-user: #E8ECF0;
+      --border-subtle: #DDE2E8;
+      --text: #1A202C;
+      --text-muted: #6B7280;
+      color: var(--text);
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      padding: 12px 16px 0;
+      /* 背景保持透明，让 QML 的 cChatBg 透出来 */
+      background: transparent;
+      color: var(--text);
+    }
+
+    /* 整体聊天区域：去掉最外层大卡片，贴合宿主应用背景 */
+    #chat-shell {
+      position: relative;
+      max-width: 980px;
+      width: 100%;
+      min-height: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      border-radius: 0;
+      /* 这里同样保持透明，只显示内容和气泡，由外层 QML 控制底色 */
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      backdrop-filter: none;
+      color: var(--text);
+    }
+
+    /* 顶部标题栏 */
+    #chat-header {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 4px 8px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: transparent;
+      box-shadow: none;
+      z-index: 1;
+    }
+    .chat-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .chat-logo-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background:
+        conic-gradient(from 200deg, #4f46e5, #22c55e, #06b6d4, #f97316, #4f46e5);
+      box-shadow: 0 0 0 1px rgba(15,23,42,0.75), 0 0 16px rgba(79,70,229,0.8);
+      position: relative;
+    }
+    .chat-logo-dot::after {
+      content: "";
+      position: absolute;
+      inset: 3px;
+      border-radius: inherit;
+      background: radial-gradient(circle at 30% 20%, #e5e7eb 0, #94a3b8 48%, #020617 100%);
+    }
+    .chat-title-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .chat-title-main {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: var(--text);
+    }
+    .chat-title-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .chat-header-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    /* 状态改成轻量的文字 + 小圆点，不再是一个重边框胶囊 */
+    .pill {
+      padding: 0;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pill-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #22c55e;
+      box-shadow: 0 0 0 1px rgba(21,128,61,0.7), 0 0 8px rgba(34,197,94,0.85);
+    }
+
+    #chat-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 0 12px;
+      position: relative;
+    }
+    #messages {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 0 20px 12px;
+    }
+
+    /* 滚动条美化（兼容 WebEngine 内核） */
+    #chat-scroll::-webkit-scrollbar {
+      width: 10px;
+    }
+    #chat-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #chat-scroll::-webkit-scrollbar-thumb {
+      background: linear-gradient(180deg, rgba(148,163,255,0.8), rgba(56,189,248,0.6));
+      border-radius: 999px;
+      border: 2px solid rgba(15,23,42,0.96);
+    }
+    #chat-scroll::-webkit-scrollbar-thumb:hover {
+      background: linear-gradient(180deg, rgba(129,140,248,1), rgba(59,130,246,0.9));
+    }
+
+    /* 消息行布局（去除持续动画，避免闪烁） */
+    .msg-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .from-ai   { flex-direction: row; }
+    .from-user { flex-direction: row-reverse; }
+    .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      box-shadow: 0 4px 10px rgba(15,23,42,0.4);
+    }
+    .avatar-ai {
+      background: conic-gradient(from 220deg, #FACC15, #FB923C, #F97316, #FACC15);
+    }
+    .avatar-user {
+      background: conic-gradient(from 200deg, #6366F1, #4F46E5, #22c55e, #6366F1);
+    }
+    .bubble {
+      max-width: 640px;
+      padding: 10px 14px;
+      border-radius: 18px;
+      border: 1px solid var(--border-subtle);
+      box-shadow: 0 10px 30px rgba(15,23,42,0.35);
+      backdrop-filter: blur(12px);
+      position: relative;
+    }
+    /* 使用主题变量控制气泡底色：Dark 下为灰黑色，Light 下为白灰色 */
+    .from-ai   .bubble {
+      background: var(--bubble-ai);
+    }
+    .from-user .bubble {
+      background: var(--bubble-user);
+      border-color: var(--border-subtle);
+    }
+
+    .bubble-content {
+      white-space: normal;
+      word-wrap: break-word;
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .from-user .bubble-content { color: var(--text); }
+
+    /* Markdown / KaTeX 内容更细致的排版（对标 huggingface/chat-ui） */
+    .bubble-content p {
+      margin: 0.25rem 0;
+    }
+    .bubble-content p + p {
+      margin-top: 0.5rem;
+    }
+    .bubble-content h1,
+    .bubble-content h2,
+    .bubble-content h3 {
+      margin: 0.6rem 0 0.45rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .bubble-content h1 { font-size: 1.25rem; }
+    .bubble-content h2 { font-size: 1.1rem; }
+    .bubble-content h3 { font-size: 1rem; }
+    .bubble-content ul,
+    .bubble-content ol {
+      margin: 0.4rem 0 0.6rem 1.15rem;
+      padding-left: 0.25rem;
+    }
+    .bubble-content li + li {
+      margin-top: 0.12rem;
+    }
+    .bubble-content a {
+      color: #38bdf8;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(56,189,248,0.5);
+    }
+    .bubble-content a:hover {
+      color: #0ea5e9;
+      border-bottom-color: rgba(56,189,248,0.95);
+    }
+    .bubble-content code {
+      font-size: 0.85em;
+      padding: 1px 4px;
+      border-radius: 4px;
+      background: rgba(15,23,42,0.25);
+      border: 1px solid var(--border-subtle);
+      color: var(--text);
+    }
+    .from-user .bubble-content code {
+      background: rgba(15,23,42,0.16);
+      border-color: rgba(15,23,42,0.28);
+      color: var(--text);
+    }
+    .bubble-content blockquote {
+      margin: 0.6rem 0;
+      padding: 0.25rem 0.7rem;
+      border-left: 3px solid rgba(148,163,184,0.75);
+      color: var(--text-muted);
+      background: rgba(128,128,128,0.1);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .msg-meta {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+      opacity: 0.9;
+    }
+    .msg-meta span {
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: rgba(128,128,128,0.12);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      transition: background 0.16s ease-out, border-color 0.16s ease-out, color 0.16s ease-out;
+    }
+    .msg-meta span:hover {
+      background: rgba(128,128,128,0.2);
+      color: var(--text);
+    }
+
+    .thinking {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .dot-typing {
+      display: inline-flex;
+      gap: 3px;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+    .dot-typing span {
+      width: 4px; height: 4px;
+      border-radius: 999px;
+      background: var(--text-muted);
+      animation: blink 1.2s infinite ease-in-out;
+    }
+    .dot-typing span:nth-child(2) { animation-delay: .2s; }
+    .dot-typing span:nth-child(3) { animation-delay: .4s; }
+    @keyframes blink {
+      0%, 80%, 100% { opacity: .25; transform: translateY(0px); }
+      40%          { opacity: 1;   transform: translateY(-1px); }
+    }
+
+    .tool-card {
+      margin-top: 6px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(128,128,128,0.1);
+      border: 1px solid var(--border-subtle);
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .tool-panel-result {
+      margin-top: 4px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      background: rgba(128,128,128,0.08);
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    /* User bubble action buttons */
+    .user-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-top: 6px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .msg-row.from-user:hover .user-actions {
+      opacity: 1;
+    }
+    .user-action-btn {
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      background: transparent;
+      padding: 0;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .user-action-btn:hover {
+      background: rgba(128,128,128,0.15);
+      border-color: var(--border-subtle);
+    }
+
+    /* Edit mode */
+    .edit-textarea {
+      width: 100%;
+      min-height: 60px;
+      padding: 8px 10px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      background: rgba(128,128,128,0.08);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.6;
+      font-family: inherit;
+      resize: vertical;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .edit-textarea:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 2px rgba(99,102,241,0.2);
+    }
+    .edit-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .edit-btn {
+      padding: 5px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      font-family: inherit;
+    }
+    .edit-btn-cancel {
+      background: transparent;
+      color: var(--text-muted);
+    }
+    .edit-btn-cancel:hover {
+      background: rgba(128,128,128,0.15);
+      color: var(--text);
+    }
+    .edit-btn-save {
+      background: #6366f1;
+      color: #fff;
+      border-color: #6366f1;
+    }
+    .edit-btn-save:hover {
+      background: #4f46e5;
+      border-color: #4f46e5;
+    }
+
+    /* Active timer animation */
+    @keyframes timerPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .timer-active {
+      animation: timerPulse 1.5s ease-in-out infinite;
+    }
+
+    /* 代码块增强外观（结合 JS 包装后的 .code-bubble-wrapper） */
+    .code-bubble-wrapper {
+      position: relative;
+      margin: 8px 0;
+      border-radius: 14px;
+      overflow: hidden;
+      background: radial-gradient(circle at 0 0, rgba(148,163,255,0.45), transparent 55%),
+                  rgba(15,23,42,0.98);
+      border: 1px solid rgba(148,163,184,0.7);
+      box-shadow: inset 0 0 0 1px rgba(15,23,42,0.96);
+    }
+    .code-bubble-inner {
+      overflow-x: auto;
+      padding: 8px 10px 10px;
+    }
+    .code-bubble-inner pre {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.55;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      color: #E5E7EB;
+    }
+    .code-copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 26px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.7);
+      background: radial-gradient(circle at 30% 0, rgba(248,250,252,0.18), transparent 60%),
+                  rgba(15,23,42,0.96);
+      color: #E5E7EB;
+      cursor: pointer;
+      padding: 0;
+      transition: background 0.16s ease-out, border-color 0.16s ease-out, transform 0.08s ease-out;
+    }
+    .code-copy-btn:hover {
+      transform: translateY(-0.5px);
+      background: radial-gradient(circle at 30% 0, rgba(248,250,252,0.24), transparent 60%),
+                  rgba(15,23,42,0.98);
+      border-color: rgba(191,219,254,0.9);
+    }
+    .code-copy-btn.copied {
+      border-color: #22c55e;
+      color: #22c55e;
+      box-shadow: 0 0 0 1px rgba(34,197,94,0.4);
+    }
+
+    /* 表格容器 */
+    .table-wrapper {
+      margin: 8px 0;
+      overflow-x: auto;
+      border-radius: 10px;
+      border: 1px solid rgba(148,163,184,0.6);
+      background: rgba(15,23,42,0.95);
+    }
+    .table-wrapper table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      color: #E5E7EB;
+    }
+    .table-wrapper th,
+    .table-wrapper td {
+      padding: 6px 9px;
+      border-bottom: 1px solid rgba(30,41,59,0.95);
+    }
+    .table-wrapper th {
+      background: rgba(15,23,42,0.98);
+      font-weight: 600;
+    }
+    .table-wrapper tr:nth-child(even) td {
+      background: rgba(15,23,42,0.94);
+    }
+
+    /* RAG 重写 / 查询 / 思考 面板：改成“气泡内的轻量分节行”，避免方框套方框 */
+    .meta-panel {
+      margin: 4px 0 3px;
+      border-radius: 0;
+      border: none;
+      background: transparent;
+      overflow: visible;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .meta-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 2px 2px 2px;
+      cursor: pointer;
+      background: transparent;
+    }
+    .meta-panel-header-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+    .meta-panel-header-title span.meta-pill {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(128,128,128,0.1);
+      color: var(--text-muted);
+    }
+    .meta-panel-header-right {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .meta-panel-body {
+      padding: 4px 0 4px;
+      border-top: none;
+      background: transparent;
+      margin-left: 18px;
+      border-left: none; /* 去掉左侧竖线 */
+    }
+    /* 相邻步骤之间增加一条横线分隔 */
+    .meta-panel + .meta-panel {
+      border-top: 1px solid rgba(148,163,184,0.5);
+      padding-top: 6px;
+      margin-top: 6px;
+    }
+    /* 思考/联网面板与最终模型输出之间的分隔线 */
+    .meta-output-divider {
+      margin: 6px 0 8px;
+      border-top: 1px solid rgba(148,163,184,0.5);
+    }
+    /* 思考 / 联网步骤的正文用更浅颜色，和最终回答区分 */
+    .meta-panel .bubble-content {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+    .meta-panel .bubble-content p:first-child {
+      margin-top: 0;
+    }
+    .meta-panel.collapsed .meta-panel-body {
+      display: none;
+    }
+    .meta-panel-toggle-icon {
+      font-size: 11px;
+      opacity: 0.9;
+    }
+
+    #input-shell {
+      height: 0; /* 输入区交由 QML 负责，这里只做多轮对话区 */
+      overflow: hidden;
+    }
+
+    /* ===================== Light 主题覆盖，让整体更简洁明亮 ===================== */
+    body.theme-light #chat-shell {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      backdrop-filter: none;
+    }
+    body.theme-light #chat-header {
+      border-bottom: 1px solid var(--border-subtle);
+      background: transparent;
+      box-shadow: none;
+    }
+    body.theme-light #chat-scroll::-webkit-scrollbar-thumb {
+      background: linear-gradient(180deg, rgba(129,140,248,0.9), rgba(56,189,248,0.8));
+      border-color: #e5e7eb;
+    }
+    body.theme-light .bubble {
+      border-color: rgba(226,232,240,0.95);
+      box-shadow: 0 10px 24px rgba(15,23,42,0.08);
+    }
+    /* Light 模式下，AI 与用户气泡都用白灰色，文字统一为深色 */
+    body.theme-light .from-ai .bubble {
+      background: var(--bubble-ai);
+    }
+    body.theme-light .from-user .bubble {
+      background: var(--bubble-user);
+      border-color: rgba(226,232,240,0.95);
+    }
+    body.theme-light .bubble-content {
+      color: var(--text);
+    }
+    body.theme-light .from-user .bubble-content {
+      color: var(--text);
+    }
+    body.theme-light .bubble-content h1,
+    body.theme-light .bubble-content h2,
+    body.theme-light .bubble-content h3 {
+      color: var(--text);
+    }
+    body.theme-light .bubble-content a {
+      color: #2563eb;
+      border-bottom-color: rgba(37,99,235,0.45);
+    }
+    body.theme-light .bubble-content a:hover {
+      color: #1d4ed8;
+      border-bottom-color: rgba(37,99,235,0.9);
+    }
+    body.theme-light .bubble-content code {
+      background: #f3f4f6;
+      border-color: #e5e7eb;
+      color: #111827;
+    }
+    body.theme-light .from-user .bubble-content code {
+      background: rgba(15,23,42,0.08);
+      border-color: rgba(15,23,42,0.15);
+      color: var(--text);
+    }
+    body.theme-light .bubble-content blockquote {
+      border-left-color: rgba(148,163,184,0.9);
+      background: #f9fafb;
+      color: #6b7280;
+    }
+    body.theme-light .table-wrapper {
+      border-color: rgba(203,213,225,0.9);
+      background: #ffffff;
+    }
+    body.theme-light .table-wrapper table {
+      color: #0f172a;
+    }
+    body.theme-light .table-wrapper th {
+      background: #f9fafb;
+    }
+    body.theme-light .table-wrapper tr:nth-child(even) td {
+      background: #f8fafc;
+    }
+    body.theme-light .meta-panel {
+      border-color: transparent;
+      background: transparent;
+      color: var(--text-muted);
+    }
+    body.theme-light .meta-panel-header {
+      background: transparent;
+    }
+    body.theme-light .meta-panel-body {
+      background: transparent;
+      border-top-color: transparent;
+      border-left-color: rgba(148,163,184,0.35);
+    }
+    body.theme-light .code-bubble-wrapper {
+      background: #f3f4f6;
+      border-color: rgba(203,213,225,0.9);
+      box-shadow: inset 0 0 0 1px rgba(203,213,225,0.3);
+    }
+    body.theme-light .code-bubble-inner pre {
+      color: #1a202c;
+    }
+    body.theme-light .code-copy-btn {
+      background: rgba(255,255,255,0.9);
+      border-color: rgba(203,213,225,0.8);
+      color: #4b5563;
+    }
+    body.theme-light .code-copy-btn:hover {
+      background: rgba(255,255,255,1);
+      border-color: rgba(148,163,184,0.9);
+    }
+    body.theme-light .edit-textarea {
+      background: rgba(0,0,0,0.04);
+      border-color: #d1d5db;
+      color: var(--text);
+    }
+    body.theme-light .edit-textarea:focus {
+      border-color: #6366f1;
+    }
+    body.theme-light .tool-panel-result {
+      background: rgba(0,0,0,0.04);
+    }
+
+    /* 浮动入场 Keyframe */
+    @keyframes floatIn {
+      0% {
+        opacity: 0;
+        transform: translateY(6px) scale(0.99);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+  </style>
+</head>
+<body class="theme-dark">
+  <div id="root">
+    <div id="chat-shell">
+      <div id="chat-header">
+        <div class="chat-header-left">
+          <div class="chat-logo-dot"></div>
+        </div>
+        <div class="chat-header-right">
+          <div class="pill">
+            <span class="pill-dot"></span>
+            <span>就绪</span>
+          </div>
+        </div>
+      </div>
+      <div id="chat-scroll">
+        <div id="messages"></div>
+      </div>
+      <div id="input-shell"></div>
+    </div>
+  </div>
+
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script src="qrc:/src/qml/md_libs/marked.min.js"></script>
+  <script src="qrc:/src/qml/md_libs/katex.min.js"></script>
+  <script src="qrc:/src/qml/md_libs/contrib/auto-render.min.js"></script>
+  <script>
+    let qtMainView = null;
+    let qtSettings = null;
+    let qtHistory  = null;
+    let qtClipboard = null;
+
+    // 记住每个折叠面板的展开 / 收起状态，避免每次刷新后用户选择丢失
+    const panelCollapsedState = {};
+    // 记住上一次渲染的消息快照，避免 300ms 轮询时整块重复重绘导致“闪烁感”
+    let lastMessagesKey = "";
+
+    // ============ Markdown + KaTeX 渲染工具（从 md_render.html 精简移植） ============
+    function extractMathSegments(src) {
+      const text = src || '';
+      const segments = [];
+      let out = '';
+      let i = 0;
+      let id = 0;
+      function pushSegment(type, content) {
+        const token = '§§MATH_' + (id++) + '§§';
+        segments.push({ token, type, content });
+        return token;
+      }
+      while (i < text.length) {
+        if (text[i] === '$' && text[i + 1] === '$') {
+          let j = i + 2;
+          while (j < text.length && !(text[j] === '$' && text[j + 1] === '$')) j++;
+          if (j < text.length) {
+            const content = text.slice(i, j + 2);
+            out += pushSegment('block', content);
+            i = j + 2;
+            continue;
+          }
+        }
+        if (text[i] === '\\' && text[i + 1] === '[') {
+          let j = i + 2;
+          while (j < text.length && !(text[j] === '\\' && text[j + 1] === ']')) j++;
+          if (j < text.length) {
+            const content = text.slice(i, j + 2);
+            out += pushSegment('block', content);
+            i = j + 2;
+            continue;
+          }
+        }
+        if (text[i] === '$') {
+          let j = i + 1;
+          let hasContent = false;
+          while (j < text.length && text[j] !== '\n' && text[j] !== '\r' && text[j] !== '$') {
+            if (!/\s/.test(text[j])) hasContent = true;
+            j++;
+          }
+          if (j < text.length && text[j] === '$' && hasContent) {
+            const content = text.slice(i, j + 1);
+            out += pushSegment('inline', content);
+            i = j + 1;
+            continue;
+          }
+        }
+        if (text[i] === '\\' && text[i + 1] === '(') {
+          let j = i + 2;
+          while (j < text.length && !(text[j] === '\\' && text[j + 1] === ')')) j++;
+          if (j < text.length) {
+            const content = text.slice(i, j + 2);
+            out += pushSegment('inline', content);
+            i = j + 2;
+            continue;
+          }
+        }
+        out += text[i];
+        i++;
+      }
+      return { text: out, segments };
+    }
+
+    function restoreMathInDom(rootEl, segments) {
+      if (!segments || !segments.length || !rootEl) return;
+      const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, null, false);
+      const byToken = Object.create(null);
+      for (const seg of segments) byToken[seg.token] = seg.content;
+      const toReplace = [];
+      while (true) {
+        const node = walker.nextNode();
+        if (!node) break;
+        const text = node.nodeValue;
+        if (text && text.indexOf('§§MATH_') !== -1) toReplace.push(node);
+      }
+      for (const node of toReplace) {
+        let text = node.nodeValue;
+        const frag = document.createDocumentFragment();
+        let lastIndex = 0;
+        const re = /§§MATH_\d+§§/g;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+          if (m.index > lastIndex) {
+            frag.appendChild(document.createTextNode(text.slice(lastIndex, m.index)));
+          }
+          const token = m[0];
+          const span = document.createElement('span');
+          span.textContent = byToken[token] || '';
+          frag.appendChild(span);
+          lastIndex = m.index + token.length;
+        }
+        if (lastIndex < text.length) {
+          frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+        }
+        node.parentNode.replaceChild(frag, node);
+      }
+    }
+
+    const copyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+    function copyToClipboard(text) {
+      if (qtClipboard && typeof qtClipboard.copyToClipboard === 'function') {
+        qtClipboard.copyToClipboard(text);
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+        return;
+      }
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } finally { ta.remove(); }
+    }
+
+    function enhanceTables(rootEl) {
+      const tables = rootEl.querySelectorAll('table');
+      tables.forEach(tbl => {
+        if (tbl.closest('.table-wrapper')) return;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'table-wrapper';
+        tbl.parentNode.insertBefore(wrapper, tbl);
+        wrapper.appendChild(tbl);
+      });
+    }
+
+    function enhanceCodeBlocks(rootEl) {
+      const pres = rootEl.querySelectorAll('pre');
+      pres.forEach(pre => {
+        if (pre.closest('.code-bubble-wrapper')) return;
+        const codeEl = pre.querySelector('code');
+        const codeText = (codeEl || pre).textContent;
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'code-bubble-wrapper';
+
+        const inner = document.createElement('div');
+        inner.className = 'code-bubble-inner';
+        inner.appendChild(pre.cloneNode(true));
+
+        const btn = document.createElement('button');
+        btn.className = 'code-copy-btn';
+        btn.type = 'button';
+        btn.innerHTML = copyIconSvg;
+        btn.title = '复制';
+        btn.onclick = () => {
+          copyToClipboard(codeText);
+          btn.classList.add('copied');
+          setTimeout(() => btn.classList.remove('copied'), 800);
+        };
+
+        wrapper.appendChild(inner);
+        wrapper.appendChild(btn);
+        pre.parentNode.replaceChild(wrapper, pre);
+      });
+    }
+
+    function renderMarkdownInto(container, md, isLight) {
+      if (!container) return;
+      const cleaned = (md || '').replace(/^\s*\n+/, '').replace(/\n+\s*$/, '');
+      const extracted = extractMathSegments(cleaned);
+      let html = marked.parse(extracted.text, { gfm: true, breaks: true });
+      html = html.replace(/<p>\s*<\/p>/g, '');
+      container.innerHTML = html;
+      restoreMathInDom(container, extracted.segments);
+      try {
+        renderMathInElement(container, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '$',  right: '$',  display: false},
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false}
+          ],
+          throwOnError: false
+        });
+      } catch (e) {
+        // ignore single render error
+      }
+      enhanceTables(container);
+      enhanceCodeBlocks(container);
+      container.classList.toggle('theme-light', !!isLight);
+    }
+
+    // 是否为 Light 主题：从 body 上的类名推导，而不是再去读 Settings，
+    // 这样完全依赖 Main.qml 里的 syncChatTheme，同一处逻辑，不会再出现左右两边不一致。
+    let isLightTheme = document.body.classList.contains('theme-light');
+
+    // ============ Real-time timer system ============
+    const timerStarts = {};
+    function ensureTimerStarted(key) {
+      if (!timerStarts[key]) timerStarts[key] = Date.now();
+      return timerStarts[key];
+    }
+    function stopTimer(key) {
+      delete timerStarts[key];
+    }
+    function formatElapsedMs(ms) {
+      return (ms / 1000).toFixed(1) + 's';
+    }
+    setInterval(function() {
+      var now = Date.now();
+      var els = document.querySelectorAll('[data-timer-key]');
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        var key = el.getAttribute('data-timer-key');
+        if (key && timerStarts[key]) {
+          el.textContent = '(' + formatElapsedMs(now - timerStarts[key]) + ')';
+        }
+      }
+    }, 100);
+
+    // ============ Icon SVGs (themed) ============
+    function getIconSvg(name) {
+      var color = isLightTheme ? '#4A4C54' : '#B5BAC1';
+      switch(name) {
+        case 'copy':
+          return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        case 'pencil':
+          return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+        case 'regenerate':
+          return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+        default: return '';
+      }
+    }
+
+    // ============ RAG links summary builder ============
+    function buildRagLinksSummary(ragLinks) {
+      if (!Array.isArray(ragLinks) || ragLinks.length === 0) return '';
+      var n = ragLinks.length;
+      var lines = [];
+      lines.push('共 ' + n + ' 条检索结果，可在回答中以 [1] [2] 引用：');
+      ragLinks.forEach(function(link, i) {
+        if (!link) return;
+        var idxNum = Number(link.index) || (i + 1);
+        var title = (link.text || '').toString().trim() || ('结果 ' + idxNum);
+        var url = (link.url || '').toString().trim();
+        var rawSnippet = (link.snippet || '').toString().trim();
+        var shortSnippet = rawSnippet || title;
+        if (shortSnippet.length > 20) shortSnippet = shortSnippet.slice(0, 20) + '…';
+        var block = '**[' + idxNum + '] [' + title + '](' + (url || '#') + ')**';
+        if (url) block += '\n' + url;
+        if (shortSnippet) block += '\n内容：' + shortSnippet;
+        lines.push(block);
+      });
+      return lines.join('\n\n');
+    }
+
+    // ============ Edit mode ============
+    var editingMsgIdx = -1;
+
+    function enterEditMode(bubble, msgIdx, originalText) {
+      editingMsgIdx = msgIdx;
+      bubble.innerHTML = '';
+
+      var textarea = document.createElement('textarea');
+      textarea.className = 'edit-textarea';
+      textarea.value = originalText;
+      bubble.appendChild(textarea);
+
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.max(60, textarea.scrollHeight) + 'px';
+      textarea.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = Math.max(60, this.scrollHeight) + 'px';
+      });
+
+      var actions = document.createElement('div');
+      actions.className = 'edit-actions';
+
+      var cancelBtn = document.createElement('button');
+      cancelBtn.className = 'edit-btn edit-btn-cancel';
+      cancelBtn.textContent = '取消';
+      cancelBtn.onclick = function() {
+        editingMsgIdx = -1;
+        lastMessagesKey = '';
+      };
+
+      var saveBtn = document.createElement('button');
+      saveBtn.className = 'edit-btn edit-btn-save';
+      saveBtn.textContent = '保存并发送';
+      saveBtn.onclick = function() {
+        var newText = textarea.value.trim();
+        if (!newText) return;
+        editingMsgIdx = -1;
+        lastMessagesKey = '';
+        if (qtMainView && typeof qtMainView.editAndRegenerate === 'function') {
+          qtMainView.editAndRegenerate(msgIdx, newText);
+        }
+      };
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(saveBtn);
+      bubble.appendChild(actions);
+
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }
+
+    function initChannel() {
+      if (typeof qt === 'undefined' || !qt.webChannelTransport)
+        return;
+      new QWebChannel(qt.webChannelTransport, function (channel) {
+        qtMainView  = channel.objects.mainView;
+        qtSettings  = channel.objects.settings;
+        qtHistory   = channel.objects.history;
+        qtClipboard = channel.objects.clipboard;
+
+        refreshMessages();
+        // 简单节流轮询：流式时更频繁，空闲时较慢
+        setInterval(function () {
+          if (!qtMainView) return;
+          refreshMessages();
+        }, 300);
+      });
+    }
+
+    function toJsArray(qtList) {
+      if (Array.isArray(qtList)) return qtList;
+      if (qtList && typeof qtList === 'object' && typeof qtList.length === 'number') {
+        const arr = [];
+        for (let i = 0; i < qtList.length; i++) {
+          arr.push(qtList[i]);
+        }
+        return arr;
+      }
+      return [];
+    }
+
+    function refreshMessages() {
+      if (!qtMainView || typeof qtMainView.getMessages !== 'function')
+        return;
+      // 每次刷新前，根据 body 上的 class 同步一次 isLightTheme，
+      // 保证在 QML 切换主题后，Markdown 渲染等也能拿到最新的明暗状态。
+      isLightTheme = document.body.classList.contains('theme-light');
+      // 同时兼容同步返回和回调返回两种风格的 QWebChannel Stub
+      let handled = false;
+      try {
+        const raw = qtMainView.getMessages();
+        if (raw && (Array.isArray(raw) || typeof raw.length === 'number')) {
+          const list = toJsArray(raw);
+          renderMessages(list);
+          handled = true;
+        }
+      } catch (e) {
+        // 忽略同步调用异常，退回到回调模式
+      }
+      if (!handled) {
+        qtMainView.getMessages(function (raw) {
+          const list = toJsArray(raw);
+          renderMessages(list);
+        });
+      }
+    }
+
+    function createMetaPanel(title, emoji, pillText, seconds, markdown, collapsibleKey, isActive, timerKey) {
+      const panel = document.createElement('div');
+      panel.className = 'meta-panel';
+
+      const header = document.createElement('div');
+      header.className = 'meta-panel-header';
+
+      const left = document.createElement('div');
+      left.className = 'meta-panel-header-title';
+      const iconSpan = document.createElement('span');
+      iconSpan.textContent = emoji;
+      const titleSpan = document.createElement('span');
+      titleSpan.textContent = title;
+      left.appendChild(iconSpan);
+      left.appendChild(titleSpan);
+      if (pillText) {
+        const pill = document.createElement('span');
+        pill.className = 'meta-pill';
+        pill.textContent = pillText;
+        left.appendChild(pill);
+      }
+
+      const right = document.createElement('div');
+      right.className = 'meta-panel-header-right';
+
+      if (isActive && timerKey) {
+        ensureTimerStarted(timerKey);
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'timer-active';
+        timeSpan.setAttribute('data-timer-key', timerKey);
+        timeSpan.textContent = '(' + formatElapsedMs(Date.now() - timerStarts[timerKey]) + ')';
+        right.appendChild(timeSpan);
+      } else {
+        const secNum = Number(seconds);
+        if (isFinite(secNum) && secNum > 0) {
+          if (timerKey) stopTimer(timerKey);
+          const timeSpan = document.createElement('span');
+          timeSpan.textContent = '(' + secNum.toFixed(1) + 's)';
+          right.appendChild(timeSpan);
+        } else if (timerKey) {
+          stopTimer(timerKey);
+        }
+      }
+
+      const toggle = document.createElement('span');
+      toggle.className = 'meta-panel-toggle-icon';
+      toggle.textContent = '▼';
+      right.appendChild(toggle);
+
+      header.appendChild(left);
+      header.appendChild(right);
+
+      const body = document.createElement('div');
+      body.className = 'meta-panel-body';
+      if (markdown && markdown.trim()) {
+        const mdDiv = document.createElement('div');
+        mdDiv.className = 'bubble-content';
+        renderMarkdownInto(mdDiv, markdown, isLightTheme);
+        body.appendChild(mdDiv);
+      }
+
+      panel.appendChild(header);
+      panel.appendChild(body);
+
+      if (collapsibleKey && panelCollapsedState[collapsibleKey]) {
+        panel.classList.add('collapsed');
+        toggle.textContent = '▶';
+      }
+
+      header.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const collapsed = panel.classList.toggle('collapsed');
+        toggle.textContent = collapsed ? '▶' : '▼';
+        if (collapsibleKey) {
+          panelCollapsedState[collapsibleKey] = collapsed;
+        }
+      });
+
+      return panel;
+    }
+
+    function renderMessages(messages) {
+      if (editingMsgIdx >= 0) return;
+
+      var box = document.getElementById('messages');
+      if (!box) return;
+
+      try {
+        var key = JSON.stringify(messages || []);
+        if (key === lastMessagesKey) return;
+        lastMessagesKey = key;
+      } catch (e) {}
+
+      var scroller = document.getElementById('chat-scroll');
+      var isAtBottom = true;
+      var previousScrollTop = 0;
+      if (scroller) {
+        previousScrollTop = scroller.scrollTop;
+        var distanceToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+        isAtBottom = distanceToBottom < 40;
+      }
+
+      box.innerHTML = '';
+      var totalMessages = messages.length;
+
+      messages.forEach(function(m, idx) {
+        var role = String(m.role || '').toLowerCase();
+        var isUser = role === 'user';
+        var isAi = role === 'ai' || role === 'assistant';
+        var msgId = m.id || idx;
+
+        var row = document.createElement('div');
+        row.className = 'msg-row ' + (isUser ? 'from-user' : 'from-ai');
+
+        var avatar = document.createElement('div');
+        avatar.className = 'avatar ' + (isUser ? 'avatar-user' : 'avatar-ai');
+        avatar.textContent = isUser ? 'Me' : '🤖';
+
+        var bubble = document.createElement('div');
+        bubble.className = 'bubble';
+
+        if (isUser) {
+          var contentText = (m.content || '');
+          var contentDiv = document.createElement('div');
+          contentDiv.className = 'bubble-content';
+          renderMarkdownInto(contentDiv, contentText, isLightTheme);
+          bubble.appendChild(contentDiv);
+
+          var actions = document.createElement('div');
+          actions.className = 'user-actions';
+
+          var copyBtn = document.createElement('button');
+          copyBtn.className = 'user-action-btn';
+          copyBtn.title = '复制';
+          copyBtn.innerHTML = getIconSvg('copy');
+          copyBtn.onclick = function() { copyToClipboard(contentText); };
+          actions.appendChild(copyBtn);
+
+          var editBtn = document.createElement('button');
+          editBtn.className = 'user-action-btn';
+          editBtn.title = '修改';
+          editBtn.innerHTML = getIconSvg('pencil');
+          editBtn.onclick = function() { enterEditMode(bubble, idx, contentText); };
+          actions.appendChild(editBtn);
+
+          var regenBtn = document.createElement('button');
+          regenBtn.className = 'user-action-btn';
+          regenBtn.title = '重新生成';
+          regenBtn.innerHTML = getIconSvg('regenerate');
+          regenBtn.onclick = function() {
+            if (!qtMainView) return;
+            if (idx + 1 < totalMessages && typeof qtMainView.resendFrom === 'function') {
+              qtMainView.resendFrom(idx + 1);
+            } else if (typeof qtMainView.editAndRegenerate === 'function') {
+              qtMainView.editAndRegenerate(idx, contentText);
+            }
+          };
+          actions.appendChild(regenBtn);
+          bubble.appendChild(actions);
+
+        } else if (isAi) {
+          var contentText = (m.content || '');
+          var hasBlocks = Array.isArray(m.blocks) && m.blocks.length > 0;
+          var ragStatus = (m.ragSearchStatus || '').toString();
+          var rewriteThinking = (m.rewriteThinking || '').toString();
+          var rewriteMs = Number(m.rewriteDurationMs);
+          var searchMs = Number(m.searchDurationMs);
+
+          if (ragStatus === 'rewriting' || (rewriteThinking && !ragStatus)) {
+            var tKey = 'rewrite-' + msgId;
+            bubble.appendChild(createMetaPanel('查询重写', '🔁', '重写中',
+              undefined, rewriteThinking, 'rewrite-' + msgId, true, tKey));
+          } else if ((ragStatus === 'searching' || ragStatus === 'done') && rewriteThinking) {
+            var sec = isFinite(rewriteMs) && rewriteMs > 0 ? (rewriteMs / 1000.0) : undefined;
+            bubble.appendChild(createMetaPanel('查询重写', '🔁', '已重写', sec, rewriteThinking,
+              'rewrite-' + msgId, false, 'rewrite-' + msgId));
+          }
+
+          if (ragStatus === 'searching') {
+            var tKey = 'search-' + msgId;
+            bubble.appendChild(createMetaPanel('联网检索', '🌐', '查询中',
+              undefined, buildRagLinksSummary(m.ragLinks), 'search-' + msgId, true, tKey));
+          } else if (ragStatus === 'done') {
+            var sec = isFinite(searchMs) && searchMs > 0 ? (searchMs / 1000.0) : undefined;
+            bubble.appendChild(createMetaPanel('联网检索', '🌐', '查询完成', sec,
+              buildRagLinksSummary(m.ragLinks), 'search-' + msgId, false, 'search-' + msgId));
+          }
+
+          if (hasBlocks) {
+            var thinkingCount = 0;
+            var replyParts = [];
+
+            m.blocks.forEach(function(b, blockIdx) {
+              if (b.type === 'thinking') {
+                thinkingCount++;
+                var thinkText = (b.content || '').toString().trim();
+                var durSec = Number(b.durationSec);
+                var isLastBlock = blockIdx === m.blocks.length - 1;
+                var isActiveThink = isLastBlock && !!m.isThinking;
+                var tkKey = 'agent-think-' + msgId + '-' + blockIdx;
+                var note = isActiveThink ? '思考中…' : '思考完成';
+                var secVal = isActiveThink ? undefined
+                  : (isFinite(durSec) && durSec > 0 ? durSec : undefined);
+
+                bubble.appendChild(createMetaPanel(
+                  '思考过程 #' + thinkingCount, '💭', note,
+                  secVal, thinkText,
+                  'agent-thinking-' + msgId + '-' + blockIdx,
+                  isActiveThink, tkKey));
+
+              } else if (b.type === 'tool') {
+                var toolName = b.toolName || 'tool';
+                var result = (b.result || '').toString();
+                var durSec = Number(b.durationSec);
+                var durVal = isFinite(durSec) && durSec > 0 ? durSec : undefined;
+                var truncResult = result.length > 300 ? result.slice(0, 300) + '…' : result;
+
+                var toolPanel = createMetaPanel(
+                  '工具调用: ' + toolName, '🔧', '已完成',
+                  durVal, null,
+                  'agent-tool-' + msgId + '-' + blockIdx,
+                  false, null);
+                var toolBody = toolPanel.querySelector('.meta-panel-body');
+                if (toolBody && truncResult) {
+                  var resultDiv = document.createElement('div');
+                  resultDiv.className = 'tool-panel-result';
+                  resultDiv.textContent = truncResult;
+                  toolBody.appendChild(resultDiv);
+                }
+                bubble.appendChild(toolPanel);
+
+              } else if (b.type === 'reply') {
+                replyParts.push(b.content || '');
+              }
+            });
+
+            if (m.pendingToolName) {
+              var pendingKey = 'pending-tool-' + msgId;
+              bubble.appendChild(createMetaPanel(
+                '工具调用: ' + m.pendingToolName, '🔧', '执行中…',
+                undefined, null,
+                'pending-tool-' + msgId,
+                true, pendingKey));
+            }
+
+            var replyText = replyParts.join('');
+            if (replyText.trim()) {
+              var divider = document.createElement('div');
+              divider.className = 'meta-output-divider';
+              bubble.appendChild(divider);
+              var replyDiv = document.createElement('div');
+              replyDiv.className = 'bubble-content';
+              renderMarkdownInto(replyDiv, replyText, isLightTheme);
+              bubble.appendChild(replyDiv);
+            }
+
+          } else {
+            var ragDone = !ragStatus || ragStatus === 'done';
+            var thinkText = (m.thinking || '').toString().trim();
+            var isStreaming = !!m.isThinking;
+
+            if (ragDone && (thinkText || isStreaming)) {
+              var tkKey = 'thinking-' + msgId;
+              var note = isStreaming ? '思考中…' : '思考完成';
+              bubble.appendChild(createMetaPanel('思考过程', '💭', note,
+                undefined, thinkText,
+                'thinking-' + msgId,
+                isStreaming, tkKey));
+            }
+
+            if (contentText && contentText.trim()) {
+              if (bubble.children.length > 0) {
+                var divider = document.createElement('div');
+                divider.className = 'meta-output-divider';
+                bubble.appendChild(divider);
+              }
+              var chatDiv = document.createElement('div');
+              chatDiv.className = 'bubble-content';
+              renderMarkdownInto(chatDiv, contentText, isLightTheme);
+              bubble.appendChild(chatDiv);
+            }
+          }
+
+          var meta = document.createElement('div');
+          meta.className = 'msg-meta';
+          var aiCopyBtn = document.createElement('span');
+          aiCopyBtn.textContent = '复制';
+          aiCopyBtn.style.cursor = 'pointer';
+          aiCopyBtn.onclick = (function(msgData, hasB) {
+            return function() {
+              var text;
+              if (hasB) {
+                var parts = [];
+                msgData.blocks.forEach(function(b) {
+                  if (b.type === 'reply') parts.push(b.content || '');
+                });
+                text = parts.join('') || (msgData.content || '');
+              } else {
+                text = (msgData.content || '');
+              }
+              if (text) copyToClipboard(text);
+            };
+          })(m, hasBlocks);
+          meta.appendChild(aiCopyBtn);
+          bubble.appendChild(meta);
+        }
+
+        row.appendChild(avatar);
+        row.appendChild(bubble);
+        box.appendChild(row);
+      });
+
+      if (scroller) {
+        if (isAtBottom) {
+          scroller.scrollTop = scroller.scrollHeight + 100;
+        } else {
+          scroller.scrollTop = previousScrollTop;
+        }
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', initChannel);
+  </script>
+</body>
+</html>
+

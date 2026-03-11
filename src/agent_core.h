@@ -42,6 +42,7 @@ public:
 
 signals:
     void chunkReceived(const QString &content, const QString &reasoning, bool isThinking);
+    void toolStarted(const QString &toolName);
     void toolExecuted(const QString &toolName, const QVariantMap &args, const QString &result, double durationSec);
     void finished();
     void errorOccurred(const QString &msg);

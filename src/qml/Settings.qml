@@ -9,8 +9,8 @@ Window {
     id: settingsWin
     property var settings: null
     title: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.settingsTitle : "Settings"
-    width: 640; height: 520
-    minimumWidth: 560; minimumHeight: 460
+    width: 680; height: 600
+    minimumWidth: 600; minimumHeight: 560
     color: (typeof settings !== "undefined" && settings.theme === "light") ? "#FAFAFA" : "#0D0D0F"
     flags: Qt.Dialog
     modality: Qt.ApplicationModal
@@ -81,15 +81,19 @@ Window {
             Layout.fillHeight: true
 
             // ── Tab 0: API 配置 ───────────────────────────────────────────────
-            ScrollView {
-                id: paramsScrollView
+            Flickable {
+                id: apiFlick
                 anchors.fill: parent
                 clip: true
-                contentWidth: availableWidth
+                contentWidth: width
+                contentHeight: apiCol.implicitHeight + 40
+                boundsBehavior: Flickable.StopAtBounds
                 visible: settingsWin.currentTab === 0
                 enabled: visible
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                 ColumnLayout {
+                    id: apiCol
                     width: parent.width - 40
                     x: 20
                     y: 20
@@ -204,15 +208,19 @@ Window {
             }
 
             // ── Tab 1: 参数调节 ───────────────────────────────────────────────
-            ScrollView {
-                id: paramsTuningScroll
+            Flickable {
+                id: paramsFlick
                 anchors.fill: parent
                 clip: true
-                contentWidth: availableWidth
+                contentWidth: width
+                contentHeight: paramsCol.implicitHeight + 40
+                boundsBehavior: Flickable.StopAtBounds
                 visible: settingsWin.currentTab === 1
                 enabled: visible
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                 ColumnLayout {
+                    id: paramsCol
                     width: parent.width - 40
                     x: 20
                     y: 20
@@ -223,7 +231,7 @@ Window {
                         hint:  (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.temperatureHint : ""
                         value: settings.temperature
                         from: 0.0; to: 1.0; stepSize: 0.05
-                        scrollView: paramsTuningScroll
+                        scrollView: paramsFlick
                         onMoved: function(value) { settings.temperature = value }
                     }
                     SliderSection {
@@ -231,7 +239,7 @@ Window {
                         hint:  (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.topPHint : ""
                         value: settings.topP
                         from: 0.0; to: 1.0; stepSize: 0.01
-                        scrollView: paramsTuningScroll
+                        scrollView: paramsFlick
                         onMoved: function(value) { settings.topP = value }
                     }
                     SliderSection {
@@ -239,7 +247,7 @@ Window {
                         hint:  (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.topKHint : ""
                         value: settings.topK
                         from: 1; to: 200; stepSize: 1
-                        scrollView: paramsTuningScroll
+                        scrollView: paramsFlick
                         onMoved: function(value) { settings.topK = value }
                     }
                     SliderSection {
@@ -247,7 +255,7 @@ Window {
                         hint:  (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.maxTokensHint : ""
                         value: settings.maxTokens
                         from: 256; to: 32768; stepSize: 256
-                        scrollView: paramsTuningScroll
+                        scrollView: paramsFlick
                         onMoved: function(value) { settings.maxTokens = value }
                     }
 
@@ -302,15 +310,19 @@ Window {
             }
 
             // ── Tab 3: Agent 设置 ────────────────────────────────────────────────
-            ScrollView {
-                id: agentScrollView
+            Flickable {
+                id: agentFlick
                 anchors.fill: parent
                 clip: true
-                contentWidth: availableWidth
+                contentWidth: width
+                contentHeight: agentCol.implicitHeight + 40
+                boundsBehavior: Flickable.StopAtBounds
                 visible: settingsWin.currentTab === 3
                 enabled: visible
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                 ColumnLayout {
+                    id: agentCol
                     width: parent.width - 40
                     x: 20
                     y: 20
@@ -321,7 +333,7 @@ Window {
                         hint:  (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.maxToolRoundsHint : ""
                         value: settings.maxToolRounds
                         from: 5; to: 40; stepSize: 1
-                        scrollView: agentScrollView
+                        scrollView: agentFlick
                         onMoved: function(v) { settings.maxToolRounds = Math.round(v) }
                     }
 
@@ -335,15 +347,19 @@ Window {
             }
 
             // ── Tab 4: 系统设置 ────────────────────────────────────────────────────
-            ScrollView {
-                id: systemScrollView
+            Flickable {
+                id: systemFlick
                 anchors.fill: parent
                 clip: true
-                contentWidth: availableWidth
+                contentWidth: width
+                contentHeight: systemCol.implicitHeight + 40
+                boundsBehavior: Flickable.StopAtBounds
                 visible: settingsWin.currentTab === 4
                 enabled: visible
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                 ColumnLayout {
+                    id: systemCol
                     width: parent.width - 40
                     x: 20
                     y: 20
@@ -808,8 +824,12 @@ Window {
 
                 onPressedChanged: {
                     if (pressed) sliderControl.forceActiveFocus()
-                    if (scrollView && scrollView.contentItem)
-                        scrollView.contentItem.interactive = !pressed
+                    if (scrollView) {
+                        if (scrollView.contentItem)
+                            scrollView.contentItem.interactive = !pressed
+                        else
+                            scrollView.interactive = !pressed
+                    }
                 }
                 onMoved: {
                     parent.parent.displayValue = value

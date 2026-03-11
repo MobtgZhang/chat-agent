@@ -154,7 +154,23 @@ void MainView::setupAgent() {
         else
             updateLastAiMessage(reasoning, content, isThinking);
     });
+    connect(m_agentCore, &AgentCore::toolStarted, this, [this](const QString &toolName) {
+        if (m_messagesModel.isEmpty()) return;
+        const int row = m_messagesModel.size() - 1;
+        QVariantMap last = m_messagesModel.at(row);
+        if (last.value("role").toString() != QLatin1String("ai")) return;
+        last["pendingToolName"] = toolName;
+        last["pendingToolStartMs"] = QDateTime::currentMSecsSinceEpoch();
+        m_messagesModel.replaceAtRow(row, last);
+    });
     connect(m_agentCore, &AgentCore::toolExecuted, this, [this](const QString &toolName, const QVariantMap &args, const QString &result, double durationSec) {
+        if (!m_messagesModel.isEmpty()) {
+            const int row = m_messagesModel.size() - 1;
+            QVariantMap last = m_messagesModel.at(row);
+            last.remove("pendingToolName");
+            last.remove("pendingToolStartMs");
+            m_messagesModel.replaceAtRow(row, last);
+        }
         m_messagesModel.appendToolBlockToLastAiMessage(toolName, args, result, durationSec);
     });
     connect(m_agentCore, &AgentCore::finished, this, [this]() {
@@ -245,10 +261,10 @@ void MainView::editAndRegenerate(int index, const QString &content) {
     const QString newContent = content.trimmed();
 
     if (role == QLatin1String("user")) {
-        // 用户消息：将修改追加为历史树的新节点（会保存当前 tail 并截断）
         if (newContent != msg["content"].toString())
             m_messagesModel.appendEditHistoryNode(index, newContent, -1);
-        // appendEditHistoryNode 内部已 truncateTo，此处无需再截断
+        else
+            m_messagesModel.truncateTo(index + 1);
     } else {
         msg["content"] = newContent;
         m_messagesModel.replaceAtRow(index, msg);
@@ -422,6 +438,12 @@ void MainView::stopGeneration() {
     }
     setIsStreaming(false);
 
+    // 若当前为联网对话，停止时也结束 RAG 状态，避免 UI 永远停留在「重写中 / 查询中」
+    m_rewriteStreaming = false;
+    if (!m_messagesModel.isEmpty()) {
+        m_messagesModel.updateLastAiMessageRagSearchStatus(QString());
+    }
+
     // 标记最后 AI 消息已完成
     if (!m_messagesModel.isEmpty()) {
         const int lastRow = m_messagesModel.size() - 1;
@@ -442,11 +464,22 @@ void MainView::startRagFetchAndApiCall(const QString &userQuery) {
         doStartApiCall(QString());
         return;
     }
+    const QVariantList msgsSnapshot = m_messagesModel.toVariantList();
     QString conversationContext = WebSearchService::buildConversationContextFromMessages(
-        m_messagesModel.toVariantList(), true);
+        msgsSnapshot, true);
+
+    // 统计历史中已存在的用户消息数量（不含当前这条），用于判断是否需要改写
+    int userCountBefore = 0;
+    for (const QVariant &v : msgsSnapshot) {
+        const QVariantMap m = v.toMap();
+        if (m.value("role").toString() == QLatin1String("user"))
+            ++userCountBefore;
+    }
 
     // Query Rewrite：有对话历史时，用 LLM 将「历史+当前问题」改写为适合搜索引擎的 query
-    if (!conversationContext.isEmpty() && m_llmBackend && !m_settings->apiKey().trimmed().isEmpty()) {
+    // 若当前只有一个用户 query（无有效历史），则直接搜索，不再走改写流程
+    if (userCountBefore > 1 && !conversationContext.isEmpty()
+        && m_llmBackend && !m_settings->apiKey().trimmed().isEmpty()) {
         m_messagesModel.updateLastAiMessageRagSearchStatus("rewriting");
         const QString sysPrompt = QStringLiteral(
             "你是一个搜索查询改写助手。根据「主问题」「历史对话」和「当前问题」，输出适合搜索引擎的查询。\n"
@@ -488,6 +521,8 @@ void MainView::startRagFetchAndApiCall(const QString &userQuery) {
 
 void MainView::onQueryRewriteDone(const QString &userQuery, const QString &rewrittenQuery,
                                  int rewriteDurationMs, const QString &rewriteThinking) {
+    // 启动“前端流式”：将完整 rewriteThinking 按小块写入模型，让 QML 看到逐字增长的效果
+    startRewriteThinkingStream(rewriteDurationMs, rewriteThinking);
     m_messagesModel.updateLastAiMessageRagSearchStatus("searching");
     QString engine = m_settings->searchEngine().trimmed().toLower();
     if (engine != QLatin1String("duckduckgo") && engine != QLatin1String("bing")
@@ -683,6 +718,45 @@ void MainView::doStartApiCall(const QString &ragContext) {
         });
         reply->deleteLater();
         if (m_activeReply == reply) m_activeReply = nullptr;
+    });
+}
+
+void MainView::startRewriteThinkingStream(int rewriteDurationMs, const QString &fullThinking) {
+    m_rewriteFullThinking = fullThinking;
+    m_rewriteStreamPos = 0;
+    m_rewriteStreaming = !m_rewriteFullThinking.isEmpty();
+
+    // 若没有任何思考内容（例如规则回退），直接写空字符串和耗时信息
+    if (!m_rewriteStreaming) {
+        m_messagesModel.updateLastAiMessageRagMeta(rewriteDurationMs, QString(), 0);
+        return;
+    }
+
+    // 先写入一个很短的前缀，避免“重写中”气泡内部长时间完全空白
+    appendRewriteThinkingChunk(rewriteDurationMs);
+}
+
+void MainView::appendRewriteThinkingChunk(int rewriteDurationMs) {
+    if (!m_rewriteStreaming || m_rewriteFullThinking.isEmpty())
+        return;
+
+    // 每次追加固定长度的子串，模拟“流式增长”
+    const int chunkSize = 32;
+    m_rewriteStreamPos = qMin(m_rewriteStreamPos + chunkSize, m_rewriteFullThinking.size());
+    const QString current = m_rewriteFullThinking.left(m_rewriteStreamPos);
+
+    // 将当前进度写入模型，QML 端的 rewriteThinking 绑定会随之更新
+    m_messagesModel.updateLastAiMessageRagMeta(rewriteDurationMs, current, 0);
+
+    if (m_rewriteStreamPos >= m_rewriteFullThinking.size()) {
+        // 已写完全部内容
+        m_rewriteStreaming = false;
+        return;
+    }
+
+    // 继续下一小块写入
+    QTimer::singleShot(40, this, [this, rewriteDurationMs]() {
+        appendRewriteThinkingChunk(rewriteDurationMs);
     });
 }
 

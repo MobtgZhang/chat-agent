@@ -65,6 +65,9 @@ public:
     // 导出当前对话为 Markdown
     Q_INVOKABLE bool exportCurrentChat(const QString &filePath);
 
+    // 提供给 Web 前端一次性获取当前会话的所有消息，用于 JS 渲染整块对话
+    Q_INVOKABLE QVariantList getMessages() const { return m_messagesModel.toVariantList(); }
+
 signals:
     void currentSessionChanged();
     void sessionNameChanged();
@@ -114,6 +117,13 @@ private:
 
     QVariantList buildApiMessages() const;
     void   setupAgent();
+
+    // 联网 Query 重写思考内容的前端“流式”展示控制（客户端逐段写入 rewriteThinking）
+    QString m_rewriteFullThinking;
+    int     m_rewriteStreamPos = 0;
+    bool    m_rewriteStreaming = false;
+    void   startRewriteThinkingStream(int rewriteDurationMs, const QString &fullThinking);
+    void   appendRewriteThinkingChunk(int rewriteDurationMs);
 };
 
 #endif // MAINVIEW_H

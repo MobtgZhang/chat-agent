@@ -7,11 +7,19 @@
 
 ShellTool::ShellTool(QObject *parent) : BaseTool(parent) {
     // 默认白名单：常用只读/安全命令
+    // Windows / Linux 兼容：命令名尽量选择两端都存在的子集
     m_allowedPrefixes = {
-        "ls", "pwd", "whoami", "date", "echo",
-        "cat", "head", "tail", "wc", "grep",
-        "find", "which", "env", "uname",
-        "mkdir"  // 允许创建目录
+        QStringLiteral("ls"), QStringLiteral("dir"),
+        QStringLiteral("pwd"),
+        QStringLiteral("whoami"), QStringLiteral("date"), QStringLiteral("echo"),
+        QStringLiteral("cat"), QStringLiteral("type"),
+        QStringLiteral("head"), QStringLiteral("tail"),
+        QStringLiteral("wc"), QStringLiteral("grep"),
+        QStringLiteral("find"),
+        QStringLiteral("which"), QStringLiteral("where"),
+        QStringLiteral("env"),
+        QStringLiteral("uname"),
+        QStringLiteral("mkdir")  // 允许创建目录
     };
 }
 
@@ -51,14 +59,27 @@ bool ShellTool::isAllowed(const QString &cmd) const {
 QString ShellTool::runCommand(const QString &cmd) {
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
-    proc.start("sh", QStringList{"-c", cmd}, QIODevice::ReadOnly);
+
+#if defined(Q_OS_WIN)
+    // Windows：使用 cmd.exe /C 执行命令
+    QString shell = QStringLiteral("cmd.exe");
+    QStringList args{QStringLiteral("/C"), cmd};
+#else
+    // Linux / macOS：使用 sh -c 执行命令
+    QString shell = QStringLiteral("sh");
+    QStringList args{QStringLiteral("-c"), cmd};
+#endif
+
+    proc.start(shell, args, QIODevice::ReadOnly);
     if (!proc.waitForFinished(15000)) {
         proc.kill();
-        return QStringLiteral("{\"error\":\"命令超时或启动失败\"}");
+        QJsonObject o;
+        o["error"] = QStringLiteral("命令超时或启动失败");
+        return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
     }
 
-    QString stdoutStr = QString::fromUtf8(proc.readAllStandardOutput());
-    int code = proc.exitCode();
+    const QString stdoutStr = QString::fromUtf8(proc.readAllStandardOutput());
+    const int code = proc.exitCode();
 
     QJsonObject o;
     o["stdout"] = stdoutStr;

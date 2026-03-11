@@ -1,24 +1,47 @@
 #!/bin/bash
+# =============================================================================
+# run.sh - 构建并运行 ChatAgent（支持 Linux 与 macOS）
+# Windows 请使用 run.ps1
+# =============================================================================
 
-# 开启“遇到错误立刻停止”模式
 set -e
 
 # ==========================================
-# 1. 变量配置
+# 1. 检测操作系统与变量配置
 # ==========================================
-# 你的 Qt 安装路径
-QT_INSTALL_DIR="/home/mobtgzhang/Qt/6.10.2/gcc_64"
+UNAME="$(uname -s)"
+case "${UNAME}" in
+    Linux*)
+        PLATFORM="linux"
+        # 默认 Qt 路径（可通过环境变量 QT_INSTALL_DIR 覆盖）
+        QT_INSTALL_DIR="${QT_INSTALL_DIR:-/home/mobtgzhang/Qt/6.10.2/gcc_64}"
+        PARALLEL_JOBS="$(nproc 2>/dev/null || echo 4)"
+        ;;
+    Darwin*)
+        PLATFORM="macos"
+        QT_INSTALL_DIR="${QT_INSTALL_DIR:-$HOME/Qt/6.10.2/macos}"
+        PARALLEL_JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+        ;;
+    *)
+        echo "❌ 不支持的操作系统: ${UNAME}"
+        echo "   Linux/macOS 请使用本脚本；Windows 请使用 run.ps1"
+        exit 1
+        ;;
+esac
+
 BUILD_DIR="build"
-EXECUTABLE_NAME="appAIChat"
+EXECUTABLE_NAME="appChatAgent"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "========================================"
-echo "🚀 开始构建项目..."
-echo "Qt 路径: ${QT_INSTALL_DIR}"
+echo "🚀 开始构建项目 (${PLATFORM})..."
+echo "   Qt 路径: ${QT_INSTALL_DIR}"
 echo "========================================"
 
 # ==========================================
 # 2. 准备构建目录
 # ==========================================
+cd "$PROJECT_ROOT"
 if [ ! -d "$BUILD_DIR" ]; then
     mkdir -p "$BUILD_DIR"
 fi
@@ -28,7 +51,6 @@ cd "$BUILD_DIR"
 # 3. 执行 CMake 配置
 # ==========================================
 echo "⚙️  正在配置 CMake..."
-# 核心：使用 CMAKE_PREFIX_PATH 告诉 CMake 去哪里找你的 Qt6
 cmake -DCMAKE_PREFIX_PATH="${QT_INSTALL_DIR}" \
       -DCMAKE_BUILD_TYPE=Release \
       ..
@@ -37,8 +59,7 @@ cmake -DCMAKE_PREFIX_PATH="${QT_INSTALL_DIR}" \
 # 4. 编译项目
 # ==========================================
 echo "🔨 正在编译..."
-# 使用全部 CPU 核心加速编译
-cmake --build . --parallel $(nproc)
+cmake --build . --parallel "${PARALLEL_JOBS}"
 
 # ==========================================
 # 5. 运行程序
@@ -46,22 +67,30 @@ cmake --build . --parallel $(nproc)
 echo "✅ 编译成功！准备运行..."
 echo "========================================"
 
-# 设置环境变量，确保运行时加载的是你安装的 Qt 动态库，而不是系统库
-export LD_LIBRARY_PATH="${QT_INSTALL_DIR}/lib:${LD_LIBRARY_PATH}"
-export QML2_IMPORT_PATH="${QT_INSTALL_DIR}/qml:${QML2_IMPORT_PATH}"
+# 设置环境变量：确保运行时加载安装的 Qt 动态库
+if [ "$PLATFORM" = "linux" ]; then
+    export LD_LIBRARY_PATH="${QT_INSTALL_DIR}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    # 屏蔽 Qt 字体 OpenType 警告（Monaco 在 Linux 上缺少部分脚本支持）
+    export QT_LOGGING_RULES="qt.text.font.db=false"
+    # 输入法：让 Qt 找到系统 fcitx5 插件；自定义 Qt 的 plugins 放最前
+    _im_plugin_paths=""
+    for d in /usr/lib/x86_64-linux-gnu/qt6/plugins /usr/lib64/qt6/plugins /usr/lib/qt6/plugins; do
+        [ -d "$d" ] && _im_plugin_paths="${_im_plugin_paths}${_im_plugin_paths:+:}$d"
+    done
+    [ -n "$_im_plugin_paths" ] && export QT_PLUGIN_PATH="${QT_INSTALL_DIR}/plugins:${_im_plugin_paths}${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+    export QT_IM_MODULES="fcitx5;fcitx;wayland;ibus"
+    export QT_IM_MODULE=fcitx5
+    export XMODIFIERS=@im=fcitx
+elif [ "$PLATFORM" = "macos" ]; then
+    export DYLD_LIBRARY_PATH="${QT_INSTALL_DIR}/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+    export QT_PLUGIN_PATH="${QT_INSTALL_DIR}/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+fi
 
-# 屏蔽 Qt 字体 OpenType 警告（Monaco 在 Linux 上缺少部分脚本支持，仅为提示，不影响功能）
-export QT_LOGGING_RULES="qt.text.font.db=false"
+export QML2_IMPORT_PATH="${QT_INSTALL_DIR}/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
 
-# 输入法：需让 Qt 找到系统安装的 fcitx5 插件。注意：自定义 Qt 的 plugins 必须放最前，
-# 否则会错误加载系统 Qt 的 sqldrivers/ssl 等，导致 QSQLITE/TLS 失败和 Segmentation fault
-_im_plugin_paths=""
-for d in /usr/lib/x86_64-linux-gnu/qt6/plugins /usr/lib64/qt6/plugins /usr/lib/qt6/plugins; do
-    [ -d "$d" ] && _im_plugin_paths="${_im_plugin_paths}${_im_plugin_paths:+:}$d"
-done
-[ -n "$_im_plugin_paths" ] && export QT_PLUGIN_PATH="${QT_INSTALL_DIR}/plugins:${_im_plugin_paths}${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
-export QT_IM_MODULES="fcitx5;fcitx;wayland;ibus"
-export QT_IM_MODULE=fcitx5
-export XMODIFIERS=@im=fcitx
-
-./${EXECUTABLE_NAME}
+# macOS 为 .app bundle（直接运行 bundle 内二进制以继承环境变量），Linux 为普通可执行文件
+if [ "$PLATFORM" = "macos" ] && [ -d "${EXECUTABLE_NAME}.app" ]; then
+    exec "./${EXECUTABLE_NAME}.app/Contents/MacOS/${EXECUTABLE_NAME}" "$@"
+else
+    exec ./${EXECUTABLE_NAME} "$@"
+fi

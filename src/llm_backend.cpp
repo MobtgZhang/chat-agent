@@ -161,7 +161,8 @@ void LLMBackend::emitPendingToolCalls() {
         QJsonParseError err;
         QJsonDocument doc = QJsonDocument::fromJson(argsStr.toUtf8(), &err);
         if (err.error != QJsonParseError::NoError || !doc.isObject()) continue;
-        toEmit.append({name, doc.object().toVariantMap()});
+        const QVariantMap vm = doc.object().toVariantMap();
+        toEmit.append(std::pair<QString, QVariantMap>(name, vm));
     }
     m_pendingToolCalls.clear();
     for (const auto &p : toEmit)

@@ -4,6 +4,7 @@
 #include "memory_module.h"
 #include "web_search_service.h"
 #include <QElapsedTimer>
+#include <QTimer>
 
 AgentCore::AgentCore(QObject *parent) : QObject(parent) {}
 
@@ -156,25 +157,29 @@ void AgentCore::doExecuteToolAndContinue(const QString &toolName, const QVariant
     if (toolName == QLatin1String("web_search"))
         actualArgs["query"] = effectiveQuery;
 
-    QElapsedTimer timer;
-    timer.start();
-    QString result = m_registry->execute(toolName, actualArgs);
-    double durationSec = timer.nsecsElapsed() / 1e9;
-    emit toolExecuted(toolName, args, result, durationSec);
+    emit toolStarted(toolName);
 
-    m_currentToolRound++;
-    if (m_currentToolRound > m_maxToolRounds) {
-        emit errorOccurred("工具调用轮次超限");
-        emit finished();
-        return;
-    }
+    QTimer::singleShot(50, this, [this, toolName, args, actualArgs]() {
+        QElapsedTimer timer;
+        timer.start();
+        QString result = m_registry->execute(toolName, actualArgs);
+        double durationSec = timer.nsecsElapsed() / 1e9;
+        emit toolExecuted(toolName, args, result, durationSec);
 
-    QVariantMap toolMsg;
-    toolMsg["role"] = "user";
-    toolMsg["content"] = QString("[Tool %1 结果]\n%2").arg(toolName, result);
-    m_pendingMessages.append(toolMsg);
+        m_currentToolRound++;
+        if (m_currentToolRound > m_maxToolRounds) {
+            emit errorOccurred("工具调用轮次超限");
+            emit finished();
+            return;
+        }
 
-    m_llm->chatStream(m_pendingMessages, buildSystemPrompt());
+        QVariantMap toolMsg;
+        toolMsg["role"] = "user";
+        toolMsg["content"] = QString("[Tool %1 结果]\n%2").arg(toolName, result);
+        m_pendingMessages.append(toolMsg);
+
+        m_llm->chatStream(m_pendingMessages, buildSystemPrompt());
+    });
 }
 
 void AgentCore::onLLMError(const QString &msg) {
