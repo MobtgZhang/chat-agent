@@ -39,7 +39,10 @@ int main(int argc, char *argv[]) {
     settings.setLocaleBridge(&locale);
     settings.refreshModels();
     History      history(&settings);
+    // SkillManager 先于 MainView 创建，以便 setupAgent 完成后立即注入
+    SkillManager skillManager(&settings);
     MainView     mainView(&settings, &history);
+    mainView.setSkillManager(&skillManager);  // 连接技能库到 AgentCore（感知/记忆阶段）
 
     // ── QML 引擎 ──────────────────────────────────────────────────────────────
     QQmlApplicationEngine engine;
@@ -53,7 +56,6 @@ int main(int argc, char *argv[]) {
     ClipboardBridge clipboardBridge;
     ctx->setContextProperty("clipboardBridge", &clipboardBridge);
     ctx->setContextProperty("agentMemory", static_cast<QObject*>(mainView.agentMemory()));
-    SkillManager skillManager(&settings);
     ctx->setContextProperty("skillManager", &skillManager);
 
     const QUrl url(QStringLiteral("qrc:/src/qml/Main.qml"));

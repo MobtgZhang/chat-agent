@@ -48,9 +48,9 @@ QString WebSearchTool::execute(const QVariantMap &args) {
     QString tcId = m_settings ? m_settings->tencentSecretId().trimmed() : QString();
     QString tcKey = m_settings ? m_settings->tencentSecretKey().trimmed() : QString();
 
-    // 搜索 + 抓取网页正文，供 LLM 综合回答；限制 3 条结果防止上下文过大
+    // 搜索 + 抓取网页正文（与 RAG 模式一致），供 LLM 综合回答
     QVector<SearchResult> results = WebSearchService::searchWithContent(
-        query, engine, proxyMode, proxyUrl, m_nam, 3, apiKey, tcId, tcKey, QString());
+        query, engine, proxyMode, proxyUrl, m_nam, 5, apiKey, tcId, tcKey, QString());
 
     QJsonObject result;
     if (engine == QLatin1String("duckduckgo")) {
@@ -62,25 +62,35 @@ QString WebSearchTool::execute(const QVariantMap &args) {
     }
     result["success"] = true;
 
+    // 每条 snippet 截断到固定长度，保持展示一致性
+    static const int kSnippetDisplayLen = 300;
+    // 总 context 上限，避免 LLM 请求体过大
+    static const int kMaxContextLen = 2000;
+
     QJsonArray related;
     QStringList contextParts;
     for (int i = 0; i < results.size(); ++i) {
         const SearchResult &r = results.at(i);
+        // 展示用 snippet：统一截断到 kSnippetDisplayLen
+        QString displaySnippet = r.snippet.isEmpty() ? r.title : r.snippet;
+        if (displaySnippet.length() > kSnippetDisplayLen)
+            displaySnippet = displaySnippet.left(kSnippetDisplayLen) + QStringLiteral("…");
+
         QJsonObject item;
         item["title"] = r.title;
         item["url"] = r.url;
-        item["snippet"] = r.snippet;
+        item["snippet"] = displaySnippet;
         related.append(item);
+
         QString block = QStringLiteral("[%1] %2\n%3")
-            .arg(i + 1).arg(r.title).arg(r.snippet.isEmpty() ? r.title : r.snippet);
+            .arg(i + 1).arg(r.title).arg(displaySnippet);
         contextParts << block;
     }
     result["related"] = related;
-    // 限制总 context 大小，防止 LLM 请求体过大导致 API 返回 500
-    QString ctx = contextParts.join(QStringLiteral("\n\n"));
-    if (ctx.length() > 2500)
-        ctx = ctx.left(2500) + QStringLiteral("…");
-    result["context"] = ctx;
+    QString fullContext = contextParts.join(QStringLiteral("\n\n"));
+    if (fullContext.length() > kMaxContextLen)
+        fullContext = fullContext.left(kMaxContextLen) + QStringLiteral("\n…[已截断]");
+    result["context"] = fullContext;  // 抓取的网页正文，供 LLM 综合回答
     if (results.isEmpty()) {
         result["abstract"] = result.contains("searchUrl")
             ? QStringLiteral("未解析到结果，请访问上方 searchUrl 手动搜索。")

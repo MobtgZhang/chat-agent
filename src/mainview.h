@@ -20,6 +20,7 @@ class AgentCore;
 class LLMBackend;
 class MemoryModule;
 class ToolRegistry;
+class SkillManager;
 
 class MainView : public QObject {
     Q_OBJECT
@@ -43,6 +44,9 @@ public:
 
     // Agent 记忆模块（供 QML 右侧面板使用）
     MemoryModule* agentMemory() const { return m_agentMemory; }
+
+    // 连接技能管理器（main.cpp 中 SkillManager 创建后调用）
+    void setSkillManager(SkillManager *sm);
 
     // ── 发送与控制 ────────────────────────────────────────────────────────────
     Q_INVOKABLE void sendMessage(const QString &text);
@@ -92,6 +96,7 @@ private:
     LLMBackend   *m_llmBackend = nullptr;
     MemoryModule *m_agentMemory = nullptr;
     ToolRegistry *m_toolRegistry = nullptr;
+    SkillManager *m_skillManager = nullptr;
 
     void   setIsStreaming(bool v);
     void   appendMessage(const QVariantMap &msg);

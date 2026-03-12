@@ -10,10 +10,11 @@ class LLMBackend;
 class ToolRegistry;
 class MemoryModule;
 class MessageModel;
+class SkillManager;
 
 /**
- * Agent 核心编排层（ReAct 循环）
- * 负责：意图识别 → 工具选择 → 执行 → 结果反思
+ * Agent 核心编排层（Sense → Think → Act → Memory 循环）
+ * 用户指令 → 感知（加载技能/记忆）→ 思考（LLM 推演）→ 行动（工具执行）→ 记忆（保存 Summary）
  */
 class AgentCore : public QObject {
     Q_OBJECT
@@ -29,6 +30,7 @@ public:
     void setLLM(LLMBackend *llm);
     void setTools(ToolRegistry *registry);
     void setMemory(MemoryModule *memory);
+    void setSkillManager(SkillManager *sm);
     void setSystemPromptBase(const QString &base);  // 来自 Settings，为空时用内置默认
 
     QString mode() const { return m_mode; }
@@ -36,7 +38,7 @@ public:
     int maxToolRounds() const { return m_maxToolRounds; }
     void setMaxToolRounds(int n);
 
-    // 运行一轮 Agent 循环（用户消息 → 可能多轮工具调用 → 最终回复）
+    // 运行一轮 Agent 循环（用户消息 → Sense → Think → Act → Memory）
     Q_INVOKABLE void run(const QVariantList &messages, const QString &userInput);
     Q_INVOKABLE void stop();
 
@@ -48,6 +50,8 @@ signals:
     void errorOccurred(const QString &msg);
     void modeChanged();
     void maxToolRoundsChanged();
+    // 任务成功后自动保存 Summary 为技能时触发
+    void skillSaved(const QString &skillTitle);
 
 private slots:
     void onChunk(const QString &content, const QString &reasoning, bool isThinking);
@@ -56,12 +60,18 @@ private slots:
     void onLLMError(const QString &msg);
 
 private:
+    // 感知阶段：构建系统 prompt（注入技能/记忆上下文）
     QString buildSystemPrompt() const;
+    // 感知阶段：从 SkillManager 加载与当前任务相关的技能
+    QString buildSkillContext() const;
     void doExecuteToolAndContinue(const QString &toolName, const QVariantMap &args, const QString &effectiveQuery);
+    // 记忆阶段：任务完成后自动生成 Summary 并保存为技能
+    void tryAutoSaveSkill(const QString &finalContent);
 
     LLMBackend    *m_llm = nullptr;
     ToolRegistry  *m_registry = nullptr;
     MemoryModule  *m_memory = nullptr;
+    SkillManager  *m_skillManager = nullptr;
 
     QString m_mode = "agent";
     QString m_systemPromptBase;   // 用户自定义，空则用内置默认
@@ -69,6 +79,7 @@ private:
     int m_maxToolRounds = 40;
     int m_currentToolRound = 0;
     QString m_currentUserInput;  // 当前用户输入，web_search 只用此 query 搜索
+    bool m_autoSavePending = false; // 防止并发的自动保存
 };
 
 #endif // AGENT_CORE_H

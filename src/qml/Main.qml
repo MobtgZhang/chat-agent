@@ -617,6 +617,29 @@ ApplicationWindow {
                                     font.bold: true
                                 }
                             }
+                            // 导入技能按钮（打开 .md 文件）
+                            Rectangle {
+                                width: 22; height: 22; radius: 5
+                                color: addSkillBtnHover.hovered ? cAccent : "transparent"
+                                border.color: addSkillBtnHover.hovered ? cAccent : cBorder
+                                border.width: 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "+"
+                                    color: addSkillBtnHover.hovered ? "white" : cMuted
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                }
+                                HoverHandler { id: addSkillBtnHover }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: importSkillFileDialog.open()
+                                }
+                                ToolTip.text: "导入 .md 技能文件"
+                                ToolTip.visible: addSkillBtnHover.hovered
+                                ToolTip.delay: 400
+                            }
                         }
 
                         HoverHandler { id: skillHeaderHover }
@@ -651,6 +674,7 @@ ApplicationWindow {
                         }
 
                         delegate: Rectangle {
+                            id: skillCard
                             width: skillsListView.width - 16
                             x: 8
                             height: 56
@@ -658,6 +682,8 @@ ApplicationWindow {
                             color: skillCardHover.hovered ? cHighlight : (isLight ? "#F1F5F9" : "#1E293B")
                             border.color: skillCardHover.hovered ? cAccent : cBorder
                             border.width: skillCardHover.hovered ? 1 : 0
+
+                            property string skillId: modelData.id || ""
 
                             RowLayout {
                                 anchors { fill: parent; margins: 8 }
@@ -693,169 +719,34 @@ ApplicationWindow {
                                         Layout.fillWidth: true
                                     }
                                 }
+
                             }
 
                             HoverHandler { id: skillCardHover }
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    skillDetailPopup.skillTitle   = modelData.title || ""
-                                    skillDetailPopup.skillIcon    = modelData.icon  || "🔧"
-                                    skillDetailPopup.skillContent = modelData.content || ""
-                                    skillDetailPopup.open()
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Rectangle { Layout.fillWidth: true; height: 1; color: cDivider }
-
-                // ── Agent Memory（自动总结的记忆，可删除）───────────────────────────
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.topMargin: 4
-                    spacing: 4
-
-                    Text {
-                        text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? ("🧠 " + localeBridge.t.agentMemory) : "Agent Memory"
-                        color: cText
-                        font.pixelSize: 13
-                        font.bold: true
-                        Layout.leftMargin: 10
-                    }
-
-                    ScrollView {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 90
-                        clip: true
-                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
-
-                        ListView {
-                            model: typeof agentMemory !== "undefined" && agentMemory ? agentMemory.longTermFacts : []
-                            spacing: 2
-                            delegate: Rectangle {
-                                width: ListView.view.width - 4
-                                height: 30
-                                radius: 4
-                                color: memHover.hovered ? cHighlight : "transparent"
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 5
-                                    spacing: 4
-                                    Text {
-                                        text: modelData.key + ":"
-                                        color: cAccent
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                        Layout.preferredWidth: 55
-                                        elide: Text.ElideRight
-                                    }
-                                    Text {
-                                        text: modelData.value
-                                        color: cText
-                                        font.pixelSize: 10
-                                        Layout.fillWidth: true
-                                        elide: Text.ElideRight
-                                    }
-                                    Text {
-                                        text: "×"
-                                        color: memDelHover.hovered ? "#ED4245" : cMuted
-                                        font.pixelSize: 11
-                                        HoverHandler { id: memDelHover }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                if (agentMemory)
-                                                    agentMemory.removeFact(modelData.key)
-                                            }
-                                        }
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        skillContextMenu.targetId      = skillCard.skillId
+                                        skillContextMenu.targetTitle   = modelData.title   || ""
+                                        skillContextMenu.targetIcon    = modelData.icon    || "🔧"
+                                        skillContextMenu.targetContent = modelData.content || ""
+                                        var target = Overlay.overlay || appWindow.contentItem
+                                        var pos = skillCard.mapToItem(target, mouse.x, mouse.y)
+                                        skillContextMenu.openAt(pos.x, pos.y)
+                                    } else {
+                                        skillDetailPopup.skillTitle   = modelData.title   || ""
+                                        skillDetailPopup.skillIcon    = modelData.icon    || "🔧"
+                                        skillDetailPopup.skillContent = modelData.content || ""
+                                        skillDetailPopup.open()
                                     }
                                 }
-                                HoverHandler { id: memHover }
                             }
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 10
-                        Layout.rightMargin: 10
-                        height: 24
-                        visible: agentMemory && agentMemory.longTermFacts.length > 0
-                        color: memClearHover.hovered ? "#5C2E2E" : "transparent"
-                        radius: 4
-                        border.color: "#ED4245"
-                        border.width: 1
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: 4
-                            Text { text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.clearAllMemory : ""; color: "#ED4245"; font.pixelSize: 10 }
-                        }
-                        HoverHandler { id: memClearHover }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: memClearDialog.open()
                         }
                     }
                 }
-
-                // 清空记忆确认对话框
-                Dialog {
-                    id: memClearDialog
-                    title: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.clearAgentMemory : "Clear Agent Memory"
-                    modal: true
-                    anchors.centerIn: parent
-                    width: 300
-                    background: Rectangle { color: cPopupBg; radius: 8; border.color: cBorder }
-                    contentItem: Text {
-                        text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.clearMemoryConfirm : ""
-                        color: cText
-                        font.pixelSize: 13
-                    }
-                    footer: Row {
-                        spacing: 8
-                        layoutDirection: Qt.RightToLeft
-                        Button {
-                            text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.clear : "Clear"
-                            width: 80
-                            height: 32
-                            contentItem: Text {
-                                text: parent.text
-                                color: "white"
-                                font.pixelSize: 13
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle { radius: 5; color: "#ED4245" }
-                            onClicked: {
-                                if (agentMemory)
-                                    agentMemory.clearLongTerm()
-                                memClearDialog.close()
-                            }
-                        }
-                        Button {
-                            text: (localeBridge && localeBridge.t && localeBridge.tVersion >= 0) ? localeBridge.t.cancel : "Cancel"
-                            width: 80
-                            height: 32
-                            contentItem: Text {
-                                text: parent.text
-                                color: cText
-                                font.pixelSize: 13
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle { radius: 5; color: cInput; border.color: cBorder }
-                            onClicked: memClearDialog.close()
-                        }
-                    }
-                }
-
-                Rectangle { Layout.fillWidth: true; height: 1; color: cDivider }
 
                 // ── 底部按钮 ──────────────────────────────────────────────────
                 Column {
@@ -1309,6 +1200,16 @@ ApplicationWindow {
                     }
                 }
 
+                // 拦截所有导航请求：非 qrc:// 内部资源一律用系统浏览器打开，
+                // 防止链接在 WebEngineView 内部跳转导致聊天界面消失。
+                onNavigationRequested: function(request) {
+                    var url = request.url.toString()
+                    if (!url.startsWith("qrc:") && url !== "about:blank") {
+                        Qt.openUrlExternally(request.url)
+                        request.reject()
+                    }
+                }
+
                 // 当用户在“系统设置 → 主题设置”中切换 Dark / Light 时，
                 // 主 QML 已经立刻更新自身配色，这里直接把最新 theme 推送给 HTML。
                 Connections {
@@ -1642,6 +1543,288 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    // ── 删除技能确认对话框 ───────────────────────────────────────────────────
+    Dialog {
+        id: deleteSkillDialog
+        title: "删除技能"
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+
+        property string targetId: ""
+        property string targetTitle: ""
+
+        background: Rectangle { color: cPopupBg; radius: 8; border.color: cBorder }
+
+        contentItem: Column {
+            spacing: 12; padding: 16
+            Text {
+                text: "确定要删除技能「" + deleteSkillDialog.targetTitle + "」吗？此操作无法撤销。"
+                color: cText; font.pixelSize: 14; lineHeight: 1.5; wrapMode: Text.Wrap
+                width: 280
+            }
+        }
+
+        footer: Row {
+            spacing: 8; padding: 12; layoutDirection: Qt.RightToLeft
+            Button {
+                text: "删除"; width: 80; height: 32
+                contentItem: Text { text: parent.text; color: "white"; font.pixelSize: 13;
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: 5; color: "#ED4245" }
+                onClicked: {
+                    if (deleteSkillDialog.targetId !== "" && typeof skillManager !== "undefined" && skillManager)
+                        skillManager.removeSkill(deleteSkillDialog.targetId)
+                    deleteSkillDialog.close()
+                }
+            }
+            Button {
+                text: "取消"; width: 80; height: 32
+                contentItem: Text { text: parent.text; color: cText; font.pixelSize: 13;
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: 5; color: cInput; border.color: cBorder }
+                onClicked: deleteSkillDialog.close()
+            }
+        }
+    }
+
+    // ── 导入技能文件对话框（选择 .md 文件）──────────────────────────────────────
+    FileDialog {
+        id: importSkillFileDialog
+        title: "选择技能文件 (.md)"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Markdown 文件 (*.md)", "所有文件 (*)"]
+        onAccepted: {
+            var url = selectedFile.toString()
+            var xhr = new XMLHttpRequest()
+            xhr.open("GET", url, false)
+            xhr.send()
+            var content = xhr.responseText
+            if (!content || !content.trim()) return
+            // 从文件名提取标题（去掉扩展名和路径）
+            var parts = url.split("/")
+            var filename = parts[parts.length - 1]
+            var title = decodeURIComponent(filename.replace(/\.md$/i, ""))
+            if (title && typeof skillManager !== "undefined" && skillManager)
+                skillManager.addSkill(title, content.trim(), "📄", "custom")
+        }
+    }
+
+    // ── 技能卡片右键菜单 ──────────────────────────────────────────────────────
+    Popup {
+        id: skillContextMenu
+        parent: Overlay.overlay
+        padding: 0
+        margins: 4
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        property string targetId: ""
+        property string targetTitle: ""
+        property string targetIcon: "🔧"
+        property string targetContent: ""
+
+        property real _px: 0
+        property real _py: 0
+
+        function openAt(px, py) {
+            _px = px; _py = py
+            x = px; y = py
+            open()
+        }
+
+        onOpened: {
+            x = Math.min(Math.max(6, _px), appWindow.width  - width  - 6)
+            y = Math.min(Math.max(6, _py), appWindow.height - height - 6)
+        }
+
+        background: Rectangle {
+            color: cPopupBg; radius: 10
+            border.width: 1; border.color: cBorder
+        }
+
+        contentItem: Column {
+            width: 160; spacing: 0; padding: 6
+
+            ContextMenuItem {
+                icon: "✏️"
+                label: "编辑"
+                onTriggered: {
+                    editSkillDialog.targetId = skillContextMenu.targetId
+                    editSkillIconField.text  = skillContextMenu.targetIcon
+                    editSkillTitleField.text = skillContextMenu.targetTitle
+                    editSkillContentArea.text = skillContextMenu.targetContent
+                    editSkillDialog.open()
+                    skillContextMenu.close()
+                }
+            }
+
+            ContextMenuItem {
+                icon: "🗑"
+                label: "删除"
+                accent: true
+                onTriggered: {
+                    deleteSkillDialog.targetId    = skillContextMenu.targetId
+                    deleteSkillDialog.targetTitle = skillContextMenu.targetTitle
+                    deleteSkillDialog.open()
+                    skillContextMenu.close()
+                }
+            }
+        }
+    }
+
+    // ── 编辑技能对话框 ────────────────────────────────────────────────────────
+    Dialog {
+        id: editSkillDialog
+        modal: true
+        anchors.centerIn: parent
+        width: 480
+        height: 400
+
+        property string targetId: ""
+
+        background: Rectangle { color: cPopupBg; radius: 12; border.color: cBorder; border.width: 1 }
+
+        header: Rectangle {
+            width: parent ? parent.width : 0
+            height: 52
+            color: "transparent"
+            radius: 12
+
+            RowLayout {
+                anchors { fill: parent; leftMargin: 20; rightMargin: 16 }
+                spacing: 10
+
+                Text { text: "✏️"; font.pixelSize: 18 }
+                Text {
+                    text: "编辑技能"
+                    color: cText; font.pixelSize: 15; font.bold: true
+                    Layout.fillWidth: true
+                }
+                Text {
+                    text: "✕"
+                    color: editSkillCloseHover.hovered ? "#ED4245" : cMuted
+                    font.pixelSize: 16
+                    HoverHandler { id: editSkillCloseHover }
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: editSkillDialog.close()
+                    }
+                }
+            }
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width; height: 1; color: cBorder
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 14
+            anchors { fill: parent; margins: 20; topMargin: 12 }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+
+                ColumnLayout {
+                    spacing: 4
+                    Text { text: "图标"; color: cMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        width: 56; height: 36; radius: 6
+                        color: cInput; border.color: cBorder; border.width: 1
+                        TextField {
+                            id: editSkillIconField
+                            anchors.fill: parent
+                            color: cText; font.pixelSize: 16
+                            horizontalAlignment: TextInput.AlignHCenter
+                            background: null; selectByMouse: true
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+                    Text { text: "技能名称"; color: cMuted; font.pixelSize: 12 }
+                    Rectangle {
+                        Layout.fillWidth: true; height: 36; radius: 6
+                        color: cInput
+                        border.color: editSkillTitleField.activeFocus ? cAccent : cBorder
+                        border.width: 1
+                        TextField {
+                            id: editSkillTitleField
+                            anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
+                            placeholderText: "技能名称…"
+                            placeholderTextColor: cMuted
+                            color: cText; font.pixelSize: 13
+                            background: null; selectByMouse: true
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 4
+
+                Text { text: "技能内容"; color: cMuted; font.pixelSize: 12 }
+                Rectangle {
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    radius: 6; color: cInput
+                    border.color: editSkillContentArea.activeFocus ? cAccent : cBorder
+                    border.width: 1
+                    ScrollView {
+                        anchors { fill: parent; margins: 8 }
+                        clip: true
+                        TextArea {
+                            id: editSkillContentArea
+                            placeholderText: "技能描述 / SOP 内容…"
+                            placeholderTextColor: cMuted
+                            color: cText; font.pixelSize: 13
+                            wrapMode: TextArea.Wrap
+                            background: null; selectByMouse: true
+                        }
+                    }
+                }
+            }
+        }
+
+        footer: Row {
+            spacing: 8; padding: 14; layoutDirection: Qt.RightToLeft
+            Button {
+                text: "保存"; width: 90; height: 34
+                contentItem: Text { text: parent.text; color: "white"; font.pixelSize: 13;
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle {
+                    radius: 6
+                    color: (editSkillTitleField.text.trim().length > 0 && editSkillContentArea.text.trim().length > 0)
+                        ? cAccent : Qt.darker(cAccent, 1.5)
+                }
+                onClicked: {
+                    var title   = editSkillTitleField.text.trim()
+                    var content = editSkillContentArea.text.trim()
+                    if (title.length > 0 && content.length > 0
+                            && editSkillDialog.targetId !== ""
+                            && typeof skillManager !== "undefined" && skillManager) {
+                        skillManager.updateSkill(editSkillDialog.targetId, title, content)
+                        editSkillDialog.close()
+                    }
+                }
+            }
+            Button {
+                text: "取消"; width: 90; height: 34
+                contentItem: Text { text: parent.text; color: cText; font.pixelSize: 13;
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: 6; color: cInput; border.color: cBorder }
+                onClicked: editSkillDialog.close()
+            }
+        }
+
+        onAboutToShow: { editSkillTitleField.forceActiveFocus() }
     }
 
     // ── 技能详情弹窗 ────────────────────────────────────────────────────────

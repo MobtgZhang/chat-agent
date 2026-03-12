@@ -4,6 +4,7 @@
 #include "agent_core.h"
 #include "llm_backend.h"
 #include "memory_module.h"
+#include "skill_manager.h"
 #include "tool_registry.h"
 #include "web_search_service.h"
 #include "tools/file_tool.h"
@@ -183,6 +184,21 @@ void MainView::setupAgent() {
         });
     });
     connect(m_agentCore, &AgentCore::errorOccurred, this, &MainView::errorOccurred);
+
+    // 记忆阶段（Memory）：任务成功后自动保存 Summary 为技能时，在对话中展示提示
+    connect(m_agentCore, &AgentCore::skillSaved, this, [this](const QString &title) {
+        m_messagesModel.appendToolBlockToLastAiMessage(
+            QStringLiteral("skill_saved"),
+            {{ QStringLiteral("title"), title }},
+            QString::fromUtf8("\xF0\x9F\x93\x8B \xe6\x8a\x80\xe8\x83\xbd\xe5\xb7\xb2\xe5\xad\xa6\xe4\xb9\xa0\xef\xbc\x9a") + title,
+            0.0);
+    });
+}
+
+void MainView::setSkillManager(SkillManager *sm) {
+    m_skillManager = sm;
+    if (m_agentCore)
+        m_agentCore->setSkillManager(sm);
 }
 
 void MainView::renameSession(const QString &name) {

@@ -220,63 +220,36 @@ static void applyProxy(QNetworkAccessManager *nam, Settings *settings) {
 /** 网络请求超时（毫秒），避免无代理/墙内时一直卡在「搜索中」 */
 static const int kNetworkTimeoutMs = 20000;
 
-/** 单个网页最大读取字节数：防止大页面导致 OOM */
-static const qint64 kMaxWebPageBytes = 256 * 1024;  // 256 KB
-
-/** 带超时的 GET：超时或失败返回空 QByteArray
- *  maxBytes > 0 时，下载超出后中止并返回已接收的部分数据（避免大页面耗尽内存） */
-static QByteArray getWithTimeout(QNetworkAccessManager *nam, const QNetworkRequest &req,
-                                 int timeoutMs, qint64 maxBytes = 0) {
+/** 带超时的 GET：超时或失败返回空 QByteArray */
+static QByteArray getWithTimeout(QNetworkAccessManager *nam, const QNetworkRequest &req, int timeoutMs) {
     QNetworkReply *reply = nam->get(req);
     QEventLoop loop;
     QTimer timer;
     timer.setSingleShot(true);
     QMetaObject::Connection connFinished = QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
     QObject::connect(&timer, &QTimer::timeout, &loop, [&]() { reply->abort(); loop.quit(); });
-    if (maxBytes > 0) {
-        QObject::connect(reply, &QNetworkReply::downloadProgress,
-                         reply, [reply, maxBytes](qint64 received, qint64) {
-                             if (received > maxBytes) reply->abort();
-                         });
-    }
     timer.start(timeoutMs);
     loop.exec();
     timer.stop();
     QObject::disconnect(connFinished);
-    // 超出大小被 abort 后 error() 为 OperationCanceledError，但已下载的部分数据仍有价值
-    bool ok = reply->error() == QNetworkReply::NoError
-           || (maxBytes > 0 && reply->error() == QNetworkReply::OperationCanceledError);
-    QByteArray data = ok ? reply->readAll() : QByteArray();
-    if (maxBytes > 0 && data.size() > maxBytes)
-        data.resize(static_cast<int>(maxBytes));
+    QByteArray data = (reply->error() == QNetworkReply::NoError) ? reply->readAll() : QByteArray();
     reply->deleteLater();
     return data;
 }
 
 /** 带超时的 POST：超时或失败返回空 QByteArray */
-static QByteArray postWithTimeout(QNetworkAccessManager *nam, const QNetworkRequest &req,
-                                  const QByteArray &body, int timeoutMs, qint64 maxBytes = 0) {
+static QByteArray postWithTimeout(QNetworkAccessManager *nam, const QNetworkRequest &req, const QByteArray &body, int timeoutMs) {
     QNetworkReply *reply = nam->post(req, body);
     QEventLoop loop;
     QTimer timer;
     timer.setSingleShot(true);
     QMetaObject::Connection connFinished = QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
     QObject::connect(&timer, &QTimer::timeout, &loop, [&]() { reply->abort(); loop.quit(); });
-    if (maxBytes > 0) {
-        QObject::connect(reply, &QNetworkReply::downloadProgress,
-                         reply, [reply, maxBytes](qint64 received, qint64) {
-                             if (received > maxBytes) reply->abort();
-                         });
-    }
     timer.start(timeoutMs);
     loop.exec();
     timer.stop();
     QObject::disconnect(connFinished);
-    bool ok = reply->error() == QNetworkReply::NoError
-           || (maxBytes > 0 && reply->error() == QNetworkReply::OperationCanceledError);
-    QByteArray data = ok ? reply->readAll() : QByteArray();
-    if (maxBytes > 0 && data.size() > maxBytes)
-        data.resize(static_cast<int>(maxBytes));
+    QByteArray data = (reply->error() == QNetworkReply::NoError) ? reply->readAll() : QByteArray();
     reply->deleteLater();
     return data;
 }
@@ -594,7 +567,7 @@ static QVector<SearchResult> searchBraveApiWithSnippet(
         sr.title = r["title"].toString().trimmed();
         sr.url = r["url"].toString().trimmed();
         sr.snippet = r["description"].toString().trimmed();
-        if (sr.snippet.length() > 600) sr.snippet = sr.snippet.left(600) + QStringLiteral("…");
+        if (sr.snippet.length() > 500) sr.snippet = sr.snippet.left(500) + QStringLiteral("…");
         if (!sr.title.isEmpty() && !sr.url.isEmpty())
             out.append(sr);
     }
@@ -635,7 +608,7 @@ static QVector<SearchResult> searchBingApiWithSnippet(
         sr.title = r["name"].toString().trimmed();
         sr.url = r["url"].toString().trimmed();
         sr.snippet = r["snippet"].toString().trimmed();
-        if (sr.snippet.length() > 600) sr.snippet = sr.snippet.left(600) + QStringLiteral("…");
+        if (sr.snippet.length() > 500) sr.snippet = sr.snippet.left(500) + QStringLiteral("…");
         if (!sr.title.isEmpty() && !sr.url.isEmpty())
             out.append(sr);
     }
@@ -729,7 +702,7 @@ static QVector<SearchResult> searchTencentApiWithSnippet(
         sr.url = p["url"].toString().trimmed();
         sr.snippet = p["passage"].toString().trimmed();
         if (sr.title.isEmpty()) sr.title = sr.snippet.left(100);
-        if (sr.snippet.length() > 600) sr.snippet = sr.snippet.left(600) + QStringLiteral("…");
+        if (sr.snippet.length() > 500) sr.snippet = sr.snippet.left(500) + QStringLiteral("…");
         if (!sr.url.isEmpty())
             out.append(sr);
     }
@@ -765,7 +738,7 @@ static QVector<SearchResult> searchSerperApiWithSnippet(
         sr.title = r["title"].toString().trimmed();
         sr.url = r["link"].toString().trimmed();
         sr.snippet = r["snippet"].toString().trimmed();
-        if (sr.snippet.length() > 600) sr.snippet = sr.snippet.left(600) + QStringLiteral("…");
+        if (sr.snippet.length() > 500) sr.snippet = sr.snippet.left(500) + QStringLiteral("…");
         if (!sr.title.isEmpty() && !sr.url.isEmpty())
             out.append(sr);
     }
@@ -991,8 +964,7 @@ QString WebSearchService::fetchPageContent(const QString &url,
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                      QNetworkRequest::NoLessSafeRedirectPolicy);
 
-    // 限制每页最大下载量，防止大页面耗尽内存
-    QByteArray data = getWithTimeout(useNam, req, kNetworkTimeoutMs, kMaxWebPageBytes);
+    QByteArray data = getWithTimeout(useNam, req, kNetworkTimeoutMs);
     if (data.isEmpty()) return QString();
 
     QString text = extractTextFromHtml(data);
@@ -1048,10 +1020,11 @@ static QVector<SearchResult> searchOneQuery(
         }
     }
     if (out.size() > perQueryLimit) out.resize(perQueryLimit);
+    // 抓取网页正文：限制每页 500 chars，避免多页内容拼合后超大，导致 LLM 上下文爆炸
     if (!hasApiSnippet) {
         for (int i = 0; i < out.size(); ++i) {
             if (out[i].snippet.isEmpty()) {
-                out[i].snippet = WebSearchService::fetchPageContent(out[i].url, proxyMode, proxyUrl, useNam, 600);
+                out[i].snippet = WebSearchService::fetchPageContent(out[i].url, proxyMode, proxyUrl, useNam, 500);
                 if (out[i].snippet.isEmpty()) out[i].snippet = out[i].title;
             }
         }
